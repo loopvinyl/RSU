@@ -498,7 +498,10 @@ if not df_organicos.empty:
     st.subheader("🔥 Cálculo Detalhado de Emissões (Orgânicos)")
     df_organicos_destino["MCF"] = df_organicos_destino[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
     
+    # Listas para armazenamento numérico antes da formatação
     resultados_emissoes = []
+    massas_num = []
+    mcfs_num = []
     co2eq_aterro_total = 0.0
     massa_total_aterro = 0.0
     
@@ -511,6 +514,8 @@ if not df_organicos.empty:
             ch4_20 = calcular_ch4_total_aterro_20anos(massa_t_ano, mcf, 'organico')
             co2eq_aterro_total += co2eq_20
             massa_total_aterro += massa_t_ano
+            massas_num.append(massa_t_ano)
+            mcfs_num.append(mcf)
             resultados_emissoes.append({
                 "Destino": destino,
                 "Massa anual (t)": formatar_numero_br(massa_t_ano),
@@ -561,9 +566,15 @@ if not df_organicos.empty:
         st.markdown("---")
         st.subheader("📉 Redução de Emissões Acumulada (Orgânicos)")
         
-        # Dados para o gráfico (baseline diário completo)
-        mcf_medio = np.average([r["MCF"] for r in resultados_emissoes], weights=[r["Massa anual (t)"] for r in resultados_emissoes])
-        _, _, co2eq_aterro_dia = calcular_emissoes_aterro_tco2eq(massa_kg_dia, mcf_medio, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO)
+        # Cálculo do MCF médio ponderado (agora com valores numéricos)
+        if massas_num:
+            mcf_medio = np.average(mcfs_num, weights=massas_num)
+        else:
+            mcf_medio = 0.8  # fallback
+        
+        _, _, co2eq_aterro_dia = calcular_emissoes_aterro_tco2eq(
+            massa_kg_dia, mcf_medio, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO
+        )
         co2eq_comp_dia = ch4_comp_dia * GWP_CH4_20 / 1000
         co2eq_vermi_dia = ch4_vermi_dia * GWP_CH4_20 / 1000
         
@@ -624,6 +635,8 @@ if not df_podas.empty:
     df_podas_destino["MCF"] = df_podas_destino[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'podas'))
     
     resultados_emissoes = []
+    massas_num = []
+    mcfs_num = []
     co2eq_aterro_total = 0.0
     massa_total_aterro = 0.0
     
@@ -636,6 +649,8 @@ if not df_podas.empty:
             ch4_20 = calcular_ch4_total_aterro_20anos(massa_t_ano, mcf, 'podas')
             co2eq_aterro_total += co2eq_20
             massa_total_aterro += massa_t_ano
+            massas_num.append(massa_t_ano)
+            mcfs_num.append(mcf)
             resultados_emissoes.append({
                 "Destino": destino,
                 "Massa anual (t)": formatar_numero_br(massa_t_ano),
@@ -669,6 +684,7 @@ if not df_podas.empty:
         Fatores de emissão reduzidos (CH₄). Baseline inclui N₂O.
         """)
         
+        # Gráfico opcional para podas (pode ser adicionado similar ao de orgânicos)
     else:
         st.success("✅ Nenhuma poda indo para aterro.")
 else:
