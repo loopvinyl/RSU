@@ -352,6 +352,23 @@ def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     return mcf_base
 
 # =========================================================
+# FILTRO DE DESTINOS FINAIS (evita dupla contagem)
+# =========================================================
+def filtrar_destinos_finais(df):
+    """Remove registros de transbordo/transferência quando há destino final declarado."""
+    termos_intermediarios = ['transbordo', 'transferência', 'transferencia',
+                             'estação de transbordo', 'estacao de transbordo']
+    mask_final = ~df[COL_DESTINO].str.lower().str.contains('|'.join(termos_intermediarios), na=False)
+    grupos_com_final = df[mask_final].groupby([COL_MUNICIPIO, COL_TIPO_COLETA]).size().reset_index(name='count')
+    grupos_com_final['possui_final'] = True
+    df = df.merge(grupos_com_final[[COL_MUNICIPIO, COL_TIPO_COLETA, 'possui_final']],
+                  on=[COL_MUNICIPIO, COL_TIPO_COLETA], how='left')
+    df['possui_final'] = df['possui_final'].fillna(False)
+    df_filtrado = df[(df['possui_final'] & mask_final) | (~df['possui_final'])]
+    df_filtrado = df_filtrado.drop(columns=['possui_final'])
+    return df_filtrado
+
+# =========================================================
 # Carga e preparação dos dados
 # =========================================================
 @st.cache_data
@@ -398,6 +415,10 @@ df_clean[COL_MUNICIPIO] = df_clean[COL_MUNICIPIO].astype(str).str.strip()
 municipios = ["BRASIL – Todos os municípios"] + sorted(df_clean[COL_MUNICIPIO].unique())
 municipio = st.selectbox("Selecione o município:", municipios)
 df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[COL_MUNICIPIO] == municipio]
+
+# Aplica filtro de destinos finais (evita dupla contagem transbordo vs aterro)
+df_mun = filtrar_destinos_finais(df_mun)
+
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
@@ -641,5 +662,6 @@ st.markdown("---")
 st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
 Baseline do aterro com CH₄ + N₂O; tratamentos também incluem N₂O (conforme tco2eq) |
-Cotações em tempo real via Investing.com e APIs de câmbio.
+Cotações em tempo real via Investing.com e APIs de câmbio. | 
+⚠️ As massas exibidas consideram o destino final, removendo duplicidades com transbordo quando aplicável.
 """)
