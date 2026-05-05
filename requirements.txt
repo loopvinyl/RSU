@@ -1,5 +1,16 @@
 streamlit
 pandas
+numpy
+matplotlib
+scipy
+requests
+beautifulsoup4
+unicodedata
+yfinance
+
+
+streamlit
+pandas
 openpyxl
 
 
