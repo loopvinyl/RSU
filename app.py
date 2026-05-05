@@ -669,7 +669,7 @@ else:
 with st.expander("💡 Inovação sugerida"):
     st.markdown("""
     **Próximo passo:** classificar os municípios por **potencial total de emissões evitadas**
-    e gerar um **ranking municipal dinâmico**, identificando onde um projeto de compostagem
+    e gerar um **ranking municipal dinâmico**, identificando onde um projeto de vermicompostagem
     teria maior impacto ambiental e financeiro.
     """)
 
