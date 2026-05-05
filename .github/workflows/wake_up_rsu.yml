@@ -2,26 +2,21 @@ name: Wake Up RSU Streamlit App
 
 on:
   schedule:
-    # Executa a cada 5 horas (UTC)
     - cron: '0 */5 * * *'
   workflow_dispatch:
 
 jobs:
   wake_up:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout do repositório
         uses: actions/checkout@v5
-
       - name: Configurar Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.10'
-
       - name: Instalar dependências
         run: |
           pip install selenium webdriver-manager
-
-      - name: Executar o bot (dentro da pasta RSU)
-        run: python RSU/wake_up_bot.py
+      - name: Executar o bot
+        run: python wake_up_bot.py
