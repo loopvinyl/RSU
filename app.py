@@ -33,16 +33,13 @@ ano_selecionado = st.selectbox(
     index=1
 )
 
-# =========================================================
-# URLs dos arquivos
-# =========================================================
 URLS_POR_ANO = {
     "2023": "https://github.com/loopvinyl/tco2eqv7/raw/main/rsuBrasil_2023.xlsx",
     "2024": "https://github.com/loopvinyl/tco2eqv7/raw/main/rsuBrasil_2024.xlsx"
 }
 
 # =========================================================
-# FUNÇÕES DE COTAÇÃO (mantidas)
+# FUNÇÕES DE COTAÇÃO
 # =========================================================
 def obter_cotacao_carbono_investing():
     try:
@@ -62,7 +59,6 @@ def obter_cotacao_carbono_investing():
                 if texto:
                     preco = float(texto)
                     return preco, "€", "Carbon Futures", True, "Investing.com"
-        # fallback regex
         match = re.search(r'"last":"([\d,]+)"', str(soup))
         if match:
             preco = float(match.group(1).replace(',', ''))
@@ -96,7 +92,7 @@ def obter_cotacao_euro_real():
 def calcular_valor_creditos(emissoes_evitadas_tco2eq, preco_ton, moeda, taxa_cambio=1):
     return emissoes_evitadas_tco2eq * preco_ton * taxa_cambio
 
-# Funções de formatação
+# Formatações
 def formatar_br(numero):
     if pd.isna(numero) or numero is None:
         return "N/A"
@@ -157,14 +153,13 @@ UMIDADE_PADRAO = 0.85
 PHI_BASELINE = 0.85
 CAPTURA_CH4 = 0.0
 
-# Pré‑descarte (Feng et al. 2020)
+# Pré‑descarte
 CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000
 N2O_PRE_KG_POR_KG_DIA = (20.26 / 3) * (44/28) / 1_000_000
 PROFILE_N2O_PRE = {1: 0.8623, 2: 0.10, 3: 0.0377}
 PROFILE_N2O_LANDFILL = {1: 0.10, 2: 0.30, 3: 0.40, 4: 0.15, 5: 0.05}
 
-# Parâmetros por tipo de resíduo
-# Orgânicos
+# Parâmetros por tipo
 T_ORGANICO, DOC_ORGANICO, k_ano_ORGANICO = 25.0, 0.15, 0.06
 TOC_ORGANICO, TN_ORGANICO = 0.436, 14.2 / 1000
 CH4_C_FRAC_YANG_ORGANICO = 0.13 / 100
@@ -173,7 +168,6 @@ N2O_N_FRAC_YANG_ORGANICO = 0.92 / 100
 N2O_N_FRAC_THERMO_ORGANICO = 0.0196
 DIAS_COMPOSTAGEM_ORGANICO = 50
 
-# Podas
 T_PODAS, DOC_PODAS, k_ano_PODAS = 25.0, 0.10, 0.03
 TOC_PODAS, TN_PODAS = 0.50, 5.0 / 1000
 CH4_C_FRAC_YANG_PODAS = 0.02 / 100
@@ -182,7 +176,7 @@ N2O_N_FRAC_YANG_PODAS = 0.10 / 100
 N2O_N_FRAC_THERMO_PODAS = 0.005
 DIAS_COMPOSTAGEM_PODAS = 90
 
-# Perfis de emissão (diários, já normalizados)
+# Perfis (já normalizados)
 def carregar_perfis():
     # Vermicompostagem CH4 org
     p_ch4_vermi_org = np.array([
@@ -194,7 +188,7 @@ def carregar_perfis():
     ])
     p_ch4_vermi_org /= p_ch4_vermi_org.sum()
 
-    # N2O vermicompostagem org (Yang et al. 2017)
+    # N2O vermicompostagem org
     p_n2o_vermi_org = np.array([
         0.15, 0.10, 0.20, 0.05, 0.03, 0.03, 0.03, 0.04, 0.05, 0.06,
         0.08, 0.09, 0.10, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02,
@@ -204,7 +198,7 @@ def carregar_perfis():
     ])
     p_n2o_vermi_org /= p_n2o_vermi_org.sum()
 
-    # Compostagem termofílica CH4 (mesmo perfil)
+    # Compostagem termofílica CH4
     p_ch4_thermo_org = p_ch4_vermi_org.copy()
 
     # N2O termofílica org
@@ -217,8 +211,7 @@ def carregar_perfis():
     ])
     p_n2o_thermo_org /= p_n2o_thermo_org.sum()
 
-    # Para podas: apenas compostagem (sem vermi), estendida para 90 dias
-    # CH4 (já definido) – usaremos perfil de 90 dias
+    # Compostagem podas (90 dias)
     p_ch4_thermo_podas = np.array([
         0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
         0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.18,
@@ -231,7 +224,7 @@ def carregar_perfis():
         0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01
     ])
     p_ch4_thermo_podas /= p_ch4_thermo_podas.sum()
-    # N2O para podas (perfil estendido, valores reduzidos)
+
     p_n2o_thermo_podas = np.array([
         0.05, 0.04, 0.07, 0.02, 0.01, 0.02, 0.02, 0.03, 0.04, 0.06,
         0.08, 0.09, 0.10, 0.09, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02,
@@ -254,7 +247,7 @@ def carregar_perfis():
  p_ch4_thermo_podas, p_n2o_thermo_podas) = carregar_perfis()
 
 # =========================================================
-# FUNÇÕES DE CÁLCULO (aterro, tratamentos)
+# FUNÇÕES DE CÁLCULO
 # =========================================================
 def calcular_emissoes_aterro_tco2eq(massa_kg_dia, mcf, k_ano, temp_C, doc, dias=DIAS_PROJECAO):
     docf = 0.0147 * temp_C + 0.28
@@ -296,43 +289,47 @@ def calcular_co2eq_total_aterro_20anos(massa_t_ano, mcf, tipo_residuo):
     _, _, co2eq_dia = calcular_emissoes_aterro_tco2eq(massa_kg_dia, mcf, k, temp, doc)
     return co2eq_dia.sum()
 
+def calcular_ch4_total_aterro_20anos(massa_t_ano, mcf, tipo_residuo):
+    """Cálculo simplificado de CH4 (apenas para exibição)."""
+    if massa_t_ano <= 0 or mcf <= 0:
+        return 0.0
+    doc = DOC_ORGANICO if tipo_residuo == 'organico' else DOC_PODAS
+    temp = T_ORGANICO if tipo_residuo == 'organico' else T_PODAS
+    docf = 0.0147 * temp + 0.28
+    ch4_pot = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)
+    massa_kg_dia = (massa_t_ano * 1000) / 365
+    ch4_diario = massa_kg_dia * ch4_pot
+    t = np.arange(1, DIAS_PROJECAO + 1, dtype=float)
+    k = k_ano_ORGANICO if tipo_residuo == 'organico' else k_ano_PODAS
+    kernel = np.exp(-k * (t - 1) / 365.0) - np.exp(-k * t / 365.0)
+    emissoes = fftconvolve(np.ones(DIAS_PROJECAO) * ch4_diario, kernel, mode='full')[:DIAS_PROJECAO]
+    return emissoes.sum() / 1000  # toneladas
+
 def calcular_emissoes_compostagem_diarias(massa_kg_dia, tipo_residuo):
     if tipo_residuo == 'organico':
         TOC, TN = TOC_ORGANICO, TN_ORGANICO
-        f_ch4 = CH4_C_FRAC_THERMO_ORGANICO
-        f_n2o = N2O_N_FRAC_THERMO_ORGANICO
+        f_ch4, f_n2o = CH4_C_FRAC_THERMO_ORGANICO, N2O_N_FRAC_THERMO_ORGANICO
         p_ch4, p_n2o = p_ch4_thermo_org, p_n2o_thermo_org
-        dias_comp = DIAS_COMPOSTAGEM_ORGANICO
     else:
         TOC, TN = TOC_PODAS, TN_PODAS
-        f_ch4 = CH4_C_FRAC_THERMO_PODAS
-        f_n2o = N2O_N_FRAC_THERMO_PODAS
+        f_ch4, f_n2o = CH4_C_FRAC_THERMO_PODAS, N2O_N_FRAC_THERMO_PODAS
         p_ch4, p_n2o = p_ch4_thermo_podas, p_n2o_thermo_podas
-        dias_comp = DIAS_COMPOSTAGEM_PODAS
-
     ch4_por_lote = massa_kg_dia * TOC * f_ch4 * (16/12)
     n2o_por_lote = massa_kg_dia * TN * f_n2o * (44/28)
-    kernel_ch4 = p_ch4 * ch4_por_lote
-    kernel_n2o = p_n2o * n2o_por_lote
     entradas = np.ones(DIAS_PROJECAO, dtype=float)
-    ch4_dia = fftconvolve(entradas, kernel_ch4, mode='full')[:DIAS_PROJECAO]
-    n2o_dia = fftconvolve(entradas, kernel_n2o, mode='full')[:DIAS_PROJECAO]
+    ch4_dia = fftconvolve(entradas, p_ch4 * ch4_por_lote, mode='full')[:DIAS_PROJECAO]
+    n2o_dia = fftconvolve(entradas, p_n2o * n2o_por_lote, mode='full')[:DIAS_PROJECAO]
     return ch4_dia, n2o_dia
 
-def calcular_emissoes_vermicompostagem_diarias(massa_kg_dia, tipo_residuo='organico'):
-    # somente para orgânicos (não chamado para podas)
+def calcular_emissoes_vermicompostagem_diarias(massa_kg_dia):
     TOC, TN = TOC_ORGANICO, TN_ORGANICO
-    f_ch4 = CH4_C_FRAC_YANG_ORGANICO
-    f_n2o = N2O_N_FRAC_YANG_ORGANICO
+    f_ch4, f_n2o = CH4_C_FRAC_YANG_ORGANICO, N2O_N_FRAC_YANG_ORGANICO
     p_ch4, p_n2o = p_ch4_vermi_org, p_n2o_vermi_org
-
     ch4_por_lote = massa_kg_dia * TOC * f_ch4 * (16/12)
     n2o_por_lote = massa_kg_dia * TN * f_n2o * (44/28)
-    kernel_ch4 = p_ch4 * ch4_por_lote
-    kernel_n2o = p_n2o * n2o_por_lote
     entradas = np.ones(DIAS_PROJECAO, dtype=float)
-    ch4_dia = fftconvolve(entradas, kernel_ch4, mode='full')[:DIAS_PROJECAO]
-    n2o_dia = fftconvolve(entradas, kernel_n2o, mode='full')[:DIAS_PROJECAO]
+    ch4_dia = fftconvolve(entradas, p_ch4 * ch4_por_lote, mode='full')[:DIAS_PROJECAO]
+    n2o_dia = fftconvolve(entradas, p_n2o * n2o_por_lote, mode='full')[:DIAS_PROJECAO]
     return ch4_dia, n2o_dia
 
 # =========================================================
@@ -355,7 +352,7 @@ def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     return mcf_base
 
 # =========================================================
-# Carregamento dos dados
+# Carga e preparação dos dados
 # =========================================================
 @st.cache_data
 def load_data(ano):
@@ -376,7 +373,6 @@ COL_TIPO_COLETA = "TIPO_COLETA_EXECUTADA"
 COL_MASSA = "MASSA_COLETADA"
 COL_DESTINO = df.columns[28]
 
-# Classificação de coleta
 def classificar_coleta(texto):
     if pd.isna(texto):
         return ("Não informado", False, False, "Tipo não informado")
@@ -397,7 +393,6 @@ def classificar_coleta(texto):
             return c
     return ("Indefinido", False, False, "Não classificado")
 
-# Limpeza e seleção
 df_clean = df.dropna(subset=[COL_MUNICIPIO])
 df_clean[COL_MUNICIPIO] = df_clean[COL_MUNICIPIO].astype(str).str.strip()
 municipios = ["BRASIL – Todos os municípios"] + sorted(df_clean[COL_MUNICIPIO].unique())
@@ -412,12 +407,10 @@ st.markdown("---")
 st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
 
 df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna(0)
-destinacao = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
-destinacao = destinacao.sort_values("MASSA_FLOAT", ascending=False)
+destinacao = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index().sort_values("MASSA_FLOAT", ascending=False)
 
 def ja_eh_tratamento(destino):
-    d = str(destino).lower()
-    return "compostagem" in d or "vermicompostagem" in d
+    return "compostagem" in str(destino).lower() or "vermicompostagem" in str(destino).lower()
 
 destinacao["Ja_Biologico"] = destinacao[COL_DESTINO].apply(ja_eh_tratamento)
 df_view = destinacao.copy()
@@ -458,7 +451,7 @@ if not df_organicos.empty:
         massa_t, mcf = row["MASSA_FLOAT"], row["MCF"]
         if mcf > 0 and massa_t > 0:
             co2 = calcular_co2eq_total_aterro_20anos(massa_t, mcf, 'organico')
-            ch4 = calcular_ch4_total_aterro_20anos(massa_t, mcf, 'organico')  # preservado
+            ch4 = calcular_ch4_total_aterro_20anos(massa_t, mcf, 'organico')
             co2eq_aterro_total += co2
             massa_aterro_total += massa_t
             massas_num.append(massa_t)
@@ -475,13 +468,11 @@ if not df_organicos.empty:
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
 
-        # --- Tratamentos (compostagem e vermicompostagem) com N2O ---
         massa_kg_dia = (massa_aterro_total * 1000) / 365
         ch4_comp, n2o_comp = calcular_emissoes_compostagem_diarias(massa_kg_dia, 'organico')
         ch4_vermi, n2o_vermi = calcular_emissoes_vermicompostagem_diarias(massa_kg_dia)
         co2eq_comp = (ch4_comp.sum() * GWP_CH4_20 + n2o_comp.sum() * GWP_N2O_20) / 1000
         co2eq_vermi = (ch4_vermi.sum() * GWP_CH4_20 + n2o_vermi.sum() * GWP_N2O_20) / 1000
-
         evitado_comp = co2eq_aterro_total - co2eq_comp
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
 
@@ -492,22 +483,16 @@ if not df_organicos.empty:
         col3.metric("Evitado Compostagem", f"{formatar_numero_br(evitado_comp, 1)} tCO₂e")
         col4.metric("Evitado Vermicompostagem", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
 
-        st.info(f"""
-        **Metodologia (tco2eq):**
-        - Aterro: CH₄ + N₂O + pré‑descarte; φ=0,85; k={k_ano_ORGANICO} ano⁻¹
-        - Compostagem e vermicompostagem: CH₄ + N₂O (perfis diários, Yang et al. 2017)
-        """)
+        st.info(f"**Metodologia (tco2eq):** Aterro: CH₄+N₂O; φ=0,85; k={k_ano_ORGANICO} ano⁻¹. Compostagem e vermicompostagem: CH₄+N₂O (perfis diários).")
 
-        # Gráfico com fundo escuro
+        # Gráfico
         st.markdown("---")
         st.subheader("📉 Redução de Emissões Acumulada (Orgânicos)")
         if massas_num:
             mcf_medio = np.average(mcfs_num, weights=massas_num)
         else:
             mcf_medio = 0.8
-        _, _, co2eq_aterro_dia = calcular_emissoes_aterro_tco2eq(
-            massa_kg_dia, mcf_medio, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO
-        )
+        _, _, co2eq_aterro_dia = calcular_emissoes_aterro_tco2eq(massa_kg_dia, mcf_medio, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO)
         co2eq_comp_dia = (ch4_comp * GWP_CH4_20 + n2o_comp * GWP_N2O_20) / 1000
         co2eq_vermi_dia = (ch4_vermi * GWP_CH4_20 + n2o_vermi * GWP_N2O_20) / 1000
 
@@ -524,8 +509,7 @@ if not df_organicos.empty:
         ax.plot(df_plot['Data'], df_plot['Aterro'], 'r-', label='Aterro', linewidth=2)
         ax.plot(df_plot['Data'], df_plot['Compostagem'], 'g-', label='Compostagem', linewidth=2)
         ax.plot(df_plot['Data'], df_plot['Vermicompostagem'], 'b--', label='Vermicompostagem', linewidth=2)
-        ax.fill_between(df_plot['Data'], df_plot['Compostagem'], df_plot['Aterro'],
-                        color='lightgreen', alpha=0.3)
+        ax.fill_between(df_plot['Data'], df_plot['Compostagem'], df_plot['Aterro'], color='lightgreen', alpha=0.3)
         ax.set_title('Redução de Emissões Acumulada - Orgânicos')
         ax.set_xlabel('Ano')
         ax.set_ylabel('tCO₂e')
@@ -536,46 +520,32 @@ if not df_organicos.empty:
         ax.legend()
         st.pyplot(fig)
 
-        # --- Potencial de Créditos de Carbono ---
+        # Créditos de carbono
         st.markdown("---")
         st.subheader("💰 Potencial de Créditos de Carbono (Orgânicos)")
-
         with st.spinner("🔄 Obtendo cotações..."):
             preco_carbono, moeda_carbono, _, ok_carb, fonte_carb = obter_cotacao_carbono()
             taxa_cambio, moeda_brl, ok_cmb, fonte_cmb = obter_cotacao_euro_real()
-
         if ok_carb:
             preco_reais = preco_carbono * taxa_cambio
             valor_comp_eur = calcular_valor_creditos(evitado_comp, preco_carbono, "€")
             valor_comp_brl = calcular_valor_creditos(evitado_comp, preco_carbono, "R$", taxa_cambio)
             valor_vermi_eur = calcular_valor_creditos(evitado_vermi, preco_carbono, "€")
             valor_vermi_brl = calcular_valor_creditos(evitado_vermi, preco_carbono, "R$", taxa_cambio)
-
             col1, col2, col3 = st.columns(3)
-            col1.metric("Preço Carbono", f"{moeda_carbono} {formatar_br(preco_carbono)}/tCO₂e",
-                        help=f"Fonte: {fonte_carb}")
-            col2.metric("Câmbio EUR/BRL", f"R$ {formatar_br(taxa_cambio)}",
-                        help=f"Fonte: {fonte_cmb}")
+            col1.metric("Preço Carbono", f"{moeda_carbono} {formatar_br(preco_carbono)}/tCO₂e", help=f"Fonte: {fonte_carb}")
+            col2.metric("Câmbio EUR/BRL", f"R$ {formatar_br(taxa_cambio)}", help=f"Fonte: {fonte_cmb}")
             col3.metric("Preço em R$", f"R$ {formatar_br(preco_reais)}/tCO₂e")
-
             st.markdown("#### Compostagem")
             c1, c2 = st.columns(2)
             c1.metric("Valor total (€)", f"{moeda_carbono} {formatar_br(valor_comp_eur)}")
             c2.metric("Valor total (R$)", f"R$ {formatar_br(valor_comp_brl)}")
-
             st.markdown("#### Vermicompostagem")
             c1, c2 = st.columns(2)
             c1.metric("Valor total (€)", f"{moeda_carbono} {formatar_br(valor_vermi_eur)}")
             c2.metric("Valor total (R$)", f"R$ {formatar_br(valor_vermi_brl)}")
-
-            with st.expander("💡 Como interpretar"):
-                st.markdown(f"""
-                - Emissões evitadas pela **compostagem**: {formatar_numero_br(evitado_comp, 1)} tCO₂e
-                - Valor no mercado europeu: **€ {formatar_br(valor_comp_eur)}**
-                - Valor em reais: **R$ {formatar_br(valor_comp_brl)}**
-                """)
         else:
-            st.warning("Não foi possível obter a cotação do carbono. Verifique sua conexão.")
+            st.warning("Não foi possível obter a cotação do carbono.")
     else:
         st.success("✅ Nenhum orgânico destinado a aterro.")
 else:
@@ -627,7 +597,6 @@ if not df_podas.empty:
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
 
-        # Apenas compostagem (sem vermicompostagem)
         massa_kg_dia = (massa_aterro_total * 1000) / 365
         ch4_comp, n2o_comp = calcular_emissoes_compostagem_diarias(massa_kg_dia, 'podas')
         co2eq_comp = (ch4_comp.sum() * GWP_CH4_20 + n2o_comp.sum() * GWP_N2O_20) / 1000
@@ -639,24 +608,17 @@ if not df_podas.empty:
                     help="CH₄ + N₂O + pré‑descarte, φ=0,85")
         col3.metric("Evitado Compostagem", f"{formatar_numero_br(evitado_comp, 1)} tCO₂e")
 
-        st.info(f"""
-        **Metodologia (podas):** k={k_ano_PODAS} ano⁻¹, DOC={DOC_PODAS}, fatores reduzidos.
-        Compostagem em leiras a céu aberto (CH₄ + N₂O modelados).
-        Vermicompostagem **não recomendada** para materiais lenhosos.
-        """)
+        st.info(f"**Metodologia (podas):** k={k_ano_PODAS}, DOC={DOC_PODAS}. Compostagem em leiras a céu aberto (CH₄+N₂O). Vermicompostagem não recomendada.")
 
-        # Créditos de carbono para podas (somente compostagem)
+        # Créditos de carbono (só compostagem)
         st.markdown("---")
         st.subheader("💰 Potencial de Créditos de Carbono (Podas - Compostagem)")
         with st.spinner("🔄 Obtendo cotações..."):
             preco_carbono, moeda_carbono, _, ok_carb, fonte_carb = obter_cotacao_carbono()
             taxa_cambio, moeda_brl, ok_cmb, fonte_cmb = obter_cotacao_euro_real()
-
         if ok_carb:
-            preco_reais = preco_carbono * taxa_cambio
             valor_comp_eur = calcular_valor_creditos(evitado_comp, preco_carbono, "€")
             valor_comp_brl = calcular_valor_creditos(evitado_comp, preco_carbono, "R$", taxa_cambio)
-
             col1, col2 = st.columns(2)
             col1.metric("Valor total (€)", f"{moeda_carbono} {formatar_br(valor_comp_eur)}")
             col2.metric("Valor total (R$)", f"R$ {formatar_br(valor_comp_brl)}")
@@ -667,17 +629,14 @@ if not df_podas.empty:
 else:
     st.info("Não há dados de podas e galhadas.")
 
-# =========================================================
-# INOVAÇÃO SUGERIDA
-# =========================================================
+# Inovação sugerida
 with st.expander("💡 Inovação sugerida"):
     st.markdown("""
     **Próximo passo:** classificar os municípios por **potencial total de emissões evitadas**
-    e gerar um **ranking municipal dinâmico**. Isso permitiria identificar onde um projeto
-    de compostagem teria maior impacto ambiental e financeiro, priorizando investimentos.
+    e gerar um **ranking municipal dinâmico**, identificando onde um projeto de compostagem
+    teria maior impacto ambiental e financeiro.
     """)
 
-# Rodapé
 st.markdown("---")
 st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
