@@ -352,9 +352,10 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
+# SESSÃO DE DISTRIBUIÇÃO POR TIPO DE DESTINO (com ano dinâmico)
 if municipio == municipios[0]:
     st.markdown("---")
-    st.subheader("📊 Distribuição dos resíduos por tipo de destino")
+    st.subheader(f"📊 Distribuição dos resíduos por tipo de destino ({ano_selecionado})")
     agg_destino = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
     agg_destino = agg_destino.sort_values("MASSA_FLOAT", ascending=False)
     agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total) * 100
