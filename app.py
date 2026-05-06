@@ -514,8 +514,8 @@ if not df_organicos.empty:
         col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))
         col2.metric("CO₂e do aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total, 1)} tCO₂e",
                     help="CH₄ + N₂O + pré‑descarte, φ=0,85")
-        col3.metric("Emissões Evitadas Compostagem", f"{formatar_numero_br(evitado_comp, 1)} tCO₂e")
-        col4.metric("Emissões Evitadas Vermicompostagem", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
+        col3.metric("Evitado Compostagem", f"{formatar_numero_br(evitado_comp, 1)} tCO₂e")
+        col4.metric("Evitado Vermicompostagem", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
         st.info(f"**Metodologia (tco2eq):** Aterro: CH₄+N₂O; φ=0,85; k={k_ano_ORGANICO} ano⁻¹. Compostagem e vermicompostagem: CH₄+N₂O (perfis diários).")
 
         # Gráfico
