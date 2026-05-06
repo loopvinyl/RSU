@@ -352,16 +352,22 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
-# Distribuição por tipo de destino (com "Destino Final")
+# =========================================================
+# 📊 Distribuição por tipo de destino (com total coletado)
+# =========================================================
 if municipio == municipios[0]:
     st.markdown("---")
     st.subheader(f"📊 Distribuição dos resíduos por tipo de destino ({ano_selecionado})")
+    st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
     agg_destino = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
     agg_destino = agg_destino.sort_values("MASSA_FLOAT", ascending=False)
     agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total) * 100
     agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
     agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
-    st.dataframe(agg_destino.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "Percentual (%)"]], use_container_width=True)
+    st.dataframe(
+        agg_destino.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "Percentual (%)"]],
+        use_container_width=True
+    )
     st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final).")
 
 # ============================================================
@@ -388,7 +394,10 @@ if not df_organicos.empty:
     df_org_dest_view = df_org_dest.copy()
     df_org_dest_view["Massa (t)"] = df_org_dest_view["MASSA_FLOAT"].apply(formatar_numero_br)
     df_org_dest_view["%"] = df_org_dest_view["%"].apply(lambda x: formatar_numero_br(x, 1))
-    st.dataframe(df_org_dest_view.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "%"]], use_container_width=True)
+    st.dataframe(
+        df_org_dest_view.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "%"]],
+        use_container_width=True
+    )
 
     st.subheader("🔥 Emissões detalhadas (Orgânicos)")
     df_org_dest["MCF"] = df_org_dest[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
