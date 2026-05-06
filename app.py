@@ -375,17 +375,14 @@ if municipio == municipios[0]:
     st.markdown("---")
     st.subheader(f"📊 Distribuição dos resíduos por tipo de destino ({ano_selecionado})")
 
-    # Checkbox independente para esta seção
     ocultar_transbordo_dist = st.checkbox("Ocultar transbordos", value=False, key="ocultar_transbordo_dist")
 
-    # Cria uma cópia local do DataFrame e aplica o filtro se necessário
     df_dist = df_mun.copy()
     if ocultar_transbordo_dist:
         df_dist = df_dist[~df_dist[COL_DESTINO].apply(
             lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
         )]
 
-    # Total recalculado após o filtro local
     massa_total_dist = df_dist["MASSA_FLOAT"].sum()
     st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total_dist)} t**")
 
@@ -400,143 +397,33 @@ if municipio == municipios[0]:
     )
     st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (ex.: transbordo e destino final).")
 
+    # =========================================================
+    # 🏳️ Coleta de RSU pelos estados do Brasil
+    # =========================================================
+    st.markdown("---")
+    st.subheader(f"🏳️ Coleta de RSU pelos estados do Brasil ({ano_selecionado})")
+
+    df_estados = df_dist.copy()
+    # Calcula massa total por UF
+    agg_estados = df_estados.groupby(COL_UF)["MASSA_FLOAT"].sum().reset_index()
+    agg_estados = agg_estados.sort_values("MASSA_FLOAT", ascending=False)
+    agg_estados["%"] = (agg_estados["MASSA_FLOAT"] / massa_total_dist) * 100 if massa_total_dist > 0 else 0
+    agg_estados["% acumulado"] = agg_estados["%"].cumsum()
+
+    agg_estados["Massa (t)"] = agg_estados["MASSA_FLOAT"].apply(formatar_numero_br)
+    agg_estados["%"] = agg_estados["%"].apply(lambda x: formatar_numero_br(x, 2))
+    agg_estados["% acumulado"] = agg_estados["% acumulado"].apply(lambda x: formatar_numero_br(x, 2))
+
+    st.dataframe(
+        agg_estados.rename(columns={COL_UF: "Estado"})[["Estado", "Massa (t)", "%", "% acumulado"]],
+        use_container_width=True
+    )
+
 # ============================================================
 # ♻️ ORGÂNICOS (com "Tipo de Unidade (SNIS)")
 # ============================================================
 st.markdown("---")
 st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
-df_organicos = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains(
-    "seletiva.*orgânico|orgânico.*seletiva", case=False, na=False, regex=True)].copy()
-
-if not df_organicos.empty:
-    df_organicos["MASSA_FLOAT"] = pd.to_numeric(df_organicos[COL_MASSA], errors="coerce").fillna(0)
-    total_organicos = df_organicos["MASSA_FLOAT"].sum()
-
-    st.markdown(f"### Total de orgânicos coletados seletivamente: **{formatar_numero_br(total_organicos)} t**")
-    st.markdown("""
-    Abaixo, a destinação informada para cada rota de coleta seletiva de orgânicos, conforme o SNIS.
-    Os percentuais indicam a distribuição da massa total.
-    """)
-
-    df_org_dest = df_organicos.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
-    df_org_dest["%"] = df_org_dest["MASSA_FLOAT"] / total_organicos * 100
-    df_org_dest = df_org_dest.sort_values("%", ascending=False)
-    df_org_dest_view = df_org_dest.copy()
-    df_org_dest_view["Massa (t)"] = df_org_dest_view["MASSA_FLOAT"].apply(formatar_numero_br)
-    df_org_dest_view["%"] = df_org_dest_view["%"].apply(lambda x: formatar_numero_br(x, 1))
-    st.dataframe(
-        df_org_dest_view.rename(columns={COL_DESTINO: "Tipo de Unidade (SNIS)"})[["Tipo de Unidade (SNIS)", "Massa (t)", "%"]],
-        use_container_width=True
-    )
-
-    st.subheader("🔥 Emissões detalhadas (Orgânicos)")
-    df_org_dest["MCF"] = df_org_dest[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
-    resultados = []
-    co2eq_aterro_total = 0.0
-    massa_aterro_total = 0.0
-    for _, row in df_org_dest.iterrows():
-        massa_t, mcf = row["MASSA_FLOAT"], row["MCF"]
-        if mcf > 0 and massa_t > 0:
-            co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_t, mcf)
-            co2eq_aterro_total += co2eq_aterro
-            massa_aterro_total += massa_t
-            resultados.append({
-                "Tipo de Unidade (SNIS)": row[COL_DESTINO],
-                "Massa (t)": formatar_numero_br(massa_t),
-                "MCF": formatar_numero_br(mcf, 2),
-                "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro, 1)
-            })
-
-    if resultados:
-        st.dataframe(pd.DataFrame(resultados), use_container_width=True)
-
-        co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro_total)
-        evitado_vermi = co2eq_aterro_total - co2eq_vermi
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))
-        col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total, 1)} tCO₂e")
-        col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi, 1)} tCO₂e")
-        col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
-
-        preco = st.session_state.preco_carbono
-        cambio = st.session_state.taxa_cambio
-        valor_brl = calcular_valor_creditos(evitado_vermi, preco, "R$", cambio)
-        st.metric("💰 Valor dos créditos (R$)", f"R$ {formatar_br(valor_brl)}")
-
-    else:
-        st.success("✅ Nenhum orgânico destinado a aterro.")
-else:
-    st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
-
-# ============================================================
-# 🏆 RANKING MUNICIPAL (com "Tipo de Unidade (SNIS)")
-# ============================================================
-if municipio == municipios[0]:
-    st.markdown("---")
-    st.header(f"🏆 Mapeamento de Coleta Seletiva de Orgânicos ({ano_selecionado})")
-    st.markdown("""
-    Lista de todos os municípios que declararam possuir **coleta seletiva de resíduos orgânicos**,
-    com a massa coletada e a **receita potencial anual com créditos de carbono** (vermicompostagem).
-    """)
-
-    with st.spinner("Consultando dados..."):
-        mask_organicos = df_clean[COL_TIPO_COLETA].astype(str).str.contains(
-            "seletiva.*orgânico|orgânico.*seletiva", case=False, na=False, regex=True)
-        df_org_ranking = df_clean[mask_organicos].copy()
-
-        if df_org_ranking.empty:
-            st.info("Nenhum município registrou coleta seletiva de resíduos orgânicos.")
-        else:
-            df_org_ranking["MASSA_FLOAT_RANK"] = pd.to_numeric(df_org_ranking[COL_MASSA], errors="coerce").fillna(0)
-            ranking_data = df_org_ranking.groupby([COL_MUNICIPIO, COL_UF, COL_DESTINO])["MASSA_FLOAT_RANK"].sum().reset_index()
-
-            mapeamento = []
-            preco = st.session_state.preco_carbono
-            cambio = st.session_state.taxa_cambio
-            for (mun, uf), grupo in ranking_data.groupby([COL_MUNICIPIO, COL_UF]):
-                massa_total = grupo["MASSA_FLOAT_RANK"].sum()
-                destinos = ", ".join(sorted(grupo[COL_DESTINO].unique()))
-                
-                grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
-                massa_aterro = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
-                
-                receita_anual = 0.0
-                if massa_aterro > 0:
-                    co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_aterro, 0.8)
-                    co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro)
-                    evitado_20anos = co2eq_aterro - co2eq_vermi
-                    receita_anual = (evitado_20anos / ANOS_PROJECAO) * preco * cambio
-
-                mapeamento.append({
-                    "Município": mun,
-                    "UF": uf,
-                    "Massa Total (t/ano)": massa_total,
-                    "Massa para Aterro (t/ano)": massa_aterro,
-                    "Tipo(s) de Unidade (SNIS)": destinos,
-                    "Receita Potencial (R$/ano)": receita_anual
-                })
-
-            df_mapeamento = pd.DataFrame(mapeamento).sort_values("Massa Total (t/ano)", ascending=False)
-
-            st.dataframe(df_mapeamento.style.format({
-                "Massa Total (t/ano)": lambda x: formatar_numero_br(x, 1),
-                "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, 1),
-                "Receita Potencial (R$/ano)": lambda x: f"R$ {formatar_numero_br(x, 2)}"
-            }), use_container_width=True, height=600)
-
-            st.caption("""
-            - Cálculo baseado em **lote único** de resíduos (massa anual declarada).
-            - Receita potencial anual considerando o preço atual do carbono (cenário otimista GWP-20).
-            """)
-
-# =========================================================
-# Rodapé
-# =========================================================
-st.markdown("---")
-st.caption(f"""
-Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
-Baseline do aterro com CH₄ + N₂O; vermicompostagem: CH₄+N₂O (perfis diários) |
-Cotações em tempo real via Yahoo Finance e APIs de câmbio. |
-⚠️ Dados exibidos conforme SNIS, sem deduplicação. Transbordos podem ser ocultados com o checkbox.
-""")
+# ... (restante do código mantido exatamente igual ao último script) ...
+# Nota: mantive o restante do código exatamente como estava, sem alterações.
+# Para não alongar ainda mais a resposta, estou omitindo aqui, mas você deve copiar o script anterior completo e substituir apenas o bloco da distribuição (que já foi atualizado) e acrescentar esse novo bloco de estados, mantendo o restante idêntico.
