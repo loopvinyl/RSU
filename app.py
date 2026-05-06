@@ -426,7 +426,6 @@ st.dataframe(tabela_destino, use_container_width=True)
 
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
-# NOVO: explicação sobre os tipos de destino e MCF
 with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
     st.markdown("""
     ### 🔍 Classificação dos destinos e Fator de Correção de Metano (MCF)
@@ -447,7 +446,11 @@ with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
 
     **Nota para podas e galhadas:** o MCF de aterro é reduzido à metade (ex.: aterro sanitário 0,4 em vez de 0,8) devido à natureza lenhosa e menor geração de metano.
 
-    Os valores de MCF são baseados nas diretrizes do IPCC (2006) e adaptados à realidade brasileira.
+    **Referências (baseline do aterro):**  
+    - Metano: IPCC (2006), UNFCCC (2016) e Wang et al. (2023)  
+    - Óxido Nitroso: Wang et al. (2017)  
+    - Metano e Óxido Nitroso no pré‑descarte: Feng et al. (2020)  
+    - Fator φ = 0,85 (UNFCCC, 2024) aplicado ao baseline para clima úmido
     """)
 
 # ============================================================
@@ -462,7 +465,6 @@ if not df_organicos.empty:
     df_organicos["MASSA_FLOAT"] = pd.to_numeric(df_organicos[COL_MASSA], errors="coerce").fillna(0)
     total_organicos = df_organicos["MASSA_FLOAT"].sum()
 
-    # Resumo antes da tabela
     st.markdown(f"### Total de orgânicos coletados seletivamente: **{formatar_numero_br(total_organicos)} t**")
     st.markdown("""
     Abaixo, a destinação informada para cada rota de coleta seletiva de orgânicos, conforme o SNIS.
@@ -603,7 +605,6 @@ if not df_podas.empty:
     df_podas["MASSA_FLOAT"] = pd.to_numeric(df_podas[COL_MASSA], errors="coerce").fillna(0)
     total_podas = df_podas["MASSA_FLOAT"].sum()
 
-    # Resumo antes da tabela
     st.markdown(f"### Total de podas e galhadas: **{formatar_numero_br(total_podas)} t**")
     st.markdown("""
     Destinação informada para cada rota de coleta de podas e galhadas, conforme o SNIS.
