@@ -326,17 +326,17 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final
+# 🗺️ Destinação Final (com ano e "Destino Final")
 # =========================================================
 st.markdown("---")
-st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
+st.subheader(f"🗺️ Para onde o resíduo está indo? (Destinação Final, {ano_selecionado})")
 
 df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna(0)
 
 massa_total = df_mun["MASSA_FLOAT"].sum()
 st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
 st.markdown("""
-A tabela abaixo exibe **cada rota de coleta** e seu respectivo destino, exatamente como declarado no SNIS.
+A tabela abaixo exibe **cada rota de coleta** e seu respectivo destino final, exatamente como declarado no SNIS.
 Nenhuma agregação ou filtro foi aplicado – os valores correspondem à massa anual coletada para cada rota e destino.
 """)
 
@@ -344,7 +344,7 @@ tabela_destino = df_mun[[COL_CODIGO_ROTA, COL_TIPO_COLETA, COL_DESTINO, "MASSA_F
 tabela_destino = tabela_destino.rename(columns={
     COL_CODIGO_ROTA: "Código Rota",
     COL_TIPO_COLETA: "Tipo de Coleta",
-    COL_DESTINO: "Destino",
+    COL_DESTINO: "Destino Final",
     "MASSA_FLOAT": "Massa (t)"
 })
 tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
@@ -352,7 +352,7 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
-# SESSÃO DE DISTRIBUIÇÃO POR TIPO DE DESTINO (com ano dinâmico)
+# Distribuição por tipo de destino (com "Destino Final")
 if municipio == municipios[0]:
     st.markdown("---")
     st.subheader(f"📊 Distribuição dos resíduos por tipo de destino ({ano_selecionado})")
@@ -361,14 +361,14 @@ if municipio == municipios[0]:
     agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total) * 100
     agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
     agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
-    st.dataframe(agg_destino[[COL_DESTINO, "Massa (t)", "Percentual (%)"]], use_container_width=True)
+    st.dataframe(agg_destino.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "Percentual (%)"]], use_container_width=True)
     st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final).")
 
 # ============================================================
-# ♻️ ORGÂNICOS
+# ♻️ ORGÂNICOS (com "Destino Final")
 # ============================================================
 st.markdown("---")
-st.subheader("♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos")
+st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
 df_organicos = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains(
     "seletiva.*orgânico|orgânico.*seletiva", case=False, na=False, regex=True)].copy()
 
@@ -388,7 +388,7 @@ if not df_organicos.empty:
     df_org_dest_view = df_org_dest.copy()
     df_org_dest_view["Massa (t)"] = df_org_dest_view["MASSA_FLOAT"].apply(formatar_numero_br)
     df_org_dest_view["%"] = df_org_dest_view["%"].apply(lambda x: formatar_numero_br(x, 1))
-    st.dataframe(df_org_dest_view[[COL_DESTINO, "Massa (t)", "%"]], use_container_width=True)
+    st.dataframe(df_org_dest_view.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "%"]], use_container_width=True)
 
     st.subheader("🔥 Emissões detalhadas (Orgânicos)")
     df_org_dest["MCF"] = df_org_dest[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
@@ -402,7 +402,7 @@ if not df_organicos.empty:
             co2eq_aterro_total += co2eq_aterro
             massa_aterro_total += massa_t
             resultados.append({
-                "Destino": row[COL_DESTINO],
+                "Destino Final": row[COL_DESTINO],
                 "Massa (t)": formatar_numero_br(massa_t),
                 "MCF": formatar_numero_br(mcf, 2),
                 "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro, 1)
@@ -431,11 +431,11 @@ else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🏆 RANKING MUNICIPAL – COM RECEITA (R$/ano)
+# 🏆 RANKING MUNICIPAL (com "Destino Final")
 # ============================================================
 if municipio == municipios[0]:
     st.markdown("---")
-    st.header("🏆 Mapeamento de Coleta Seletiva de Orgânicos")
+    st.header(f"🏆 Mapeamento de Coleta Seletiva de Orgânicos ({ano_selecionado})")
     st.markdown("""
     Lista de todos os municípios que declararam possuir **coleta seletiva de resíduos orgânicos**,
     com a massa coletada e a **receita potencial anual com créditos de carbono** (vermicompostagem).
@@ -474,7 +474,7 @@ if municipio == municipios[0]:
                     "UF": uf,
                     "Massa Total (t/ano)": massa_total,
                     "Massa para Aterro (t/ano)": massa_aterro,
-                    "Destino(s)": destinos,
+                    "Destino(s) Final(is)": destinos,
                     "Receita Potencial (R$/ano)": receita_anual
                 })
 
