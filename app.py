@@ -397,14 +397,22 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (exatamente igual ao Excel)
+# 🗺️ Destinação Final (com resumo antes da tabela)
 # =========================================================
 st.markdown("---")
 st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
 
 df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna(0)
 
-# Exibe todas as rotas individuais, sem agregação
+# Resumo antes da tabela
+massa_total = df_mun["MASSA_FLOAT"].sum()
+st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
+st.markdown("""
+A tabela abaixo exibe **cada rota de coleta** e seu respectivo destino, exatamente como declarado no SNIS.
+Nenhuma agregação ou filtro foi aplicado – os valores correspondem à massa anual coletada para cada rota e destino.
+""")
+
+# Tabela com todas as rotas
 tabela_destino = df_mun[[COL_CODIGO_ROTA, COL_TIPO_COLETA, COL_DESTINO, "MASSA_FLOAT"]].copy()
 tabela_destino = tabela_destino.rename(columns={
     COL_CODIGO_ROTA: "Código Rota",
@@ -416,13 +424,7 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 
 st.dataframe(tabela_destino, use_container_width=True)
 
-massa_total = df_mun["MASSA_FLOAT"].sum()
-st.caption(f"Massa total coletada: **{formatar_numero_br(massa_total)} t**")
-
-st.info("""
-📌 **Nota:** A tabela acima mostra os registros exatamente como declarados no SNIS, sem nenhuma agregação ou filtro.
-Os valores correspondem à massa anual coletada para cada rota e destino.
-""")
+st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
 # ============================================================
 # ♻️ ORGÂNICOS (demais seções mantidas)
