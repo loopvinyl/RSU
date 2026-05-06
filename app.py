@@ -427,7 +427,7 @@ if municipio == municipios[0]:
     )
 
 # ============================================================
-# ♻️ ORGÂNICOS (com "Tipo de Unidade (SNIS)")
+# ♻️ ORGÂNICOS (com atualização de cotações restaurada)
 # ============================================================
 st.markdown("---")
 st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
@@ -485,10 +485,45 @@ if not df_organicos.empty:
         col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi, 1)} tCO₂e")
         col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
 
-        preco = st.session_state.preco_carbono
-        cambio = st.session_state.taxa_cambio
-        valor_brl = calcular_valor_creditos(evitado_vermi, preco, "R$", cambio)
-        st.metric("💰 Valor dos créditos (R$)", f"R$ {formatar_br(valor_brl)}")
+        # ============================================================
+        # 💰 POTENCIAL DE CRÉDITOS DE CARBONO (COM COTAÇÕES ATUALIZÁVEIS)
+        # ============================================================
+        st.markdown("---")
+        st.subheader("💰 Potencial de Créditos de Carbono (Vermicompostagem)")
+
+        with st.container():
+            st.markdown("### 🌍 Cotações de Mercado (Cenário Otimista GWP-20)")
+            col_cot1, col_cot2, col_cot3 = st.columns(3)
+            with col_cot1:
+                if st.button("🔄 Atualizar Cotações"):
+                    preco, moeda, _, _, _ = obter_cotacao_carbono()
+                    cambio, moeda_r, _, _ = obter_cotacao_euro_real()
+                    st.session_state.preco_carbono = preco
+                    st.session_state.moeda_carbono = moeda
+                    st.session_state.taxa_cambio = cambio
+                    st.session_state.moeda_real = moeda_r
+                    st.rerun()
+            preco = st.session_state.preco_carbono
+            moeda = st.session_state.moeda_carbono
+            cambio = st.session_state.taxa_cambio
+            with col_cot2:
+                st.metric("Carbono", f"{moeda} {formatar_br(preco)}/tCO₂e")
+            with col_cot3:
+                st.metric("Câmbio EUR/BRL", f"R$ {formatar_br(cambio)}")
+            st.metric("Preço em R$", f"R$ {formatar_br(preco * cambio)}/tCO₂e")
+
+        valor_vermi_eur = calcular_valor_creditos(evitado_vermi, preco, "€")
+        valor_vermi_brl = calcular_valor_creditos(evitado_vermi, preco, "R$", cambio)
+
+        st.metric("Valor total em Reais (R$)", f"R$ {formatar_br(valor_vermi_brl)}")
+        st.caption(f"Equivalente a {moeda} {formatar_br(valor_vermi_eur)}")
+
+        with st.expander("ℹ️ Como interpretar"):
+            st.markdown(f"""
+            - **Emissões evitadas:** {formatar_numero_br(evitado_vermi, 1)} tCO₂e
+            - **Preço do carbono:** {moeda} {formatar_br(preco)}/tCO₂e
+            - **Câmbio:** R$ {formatar_br(cambio)}/€
+            """)
 
     else:
         st.success("✅ Nenhum orgânico destinado a aterro.")
