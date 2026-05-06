@@ -18,7 +18,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🌱 Potencial de Compostagem e Vermicompostagem por Município")
+st.title("🌱 Potencial de Vermicompostagem por Município")
 st.markdown("""
 Este aplicativo interpreta os **tipos de coleta executada** informados pelos municípios
 e avalia o **potencial técnico para compostagem e vermicompostagem**
