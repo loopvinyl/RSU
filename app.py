@@ -427,7 +427,7 @@ if municipio == municipios[0]:
     )
 
 # ============================================================
-# ♻️ ORGÂNICOS (com atualização de cotações restaurada)
+# ♻️ ORGÂNICOS (com atualização de cotações e nota de precisão)
 # ============================================================
 st.markdown("---")
 st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
@@ -517,6 +517,11 @@ if not df_organicos.empty:
 
         st.metric("Valor total em Reais (R$)", f"R$ {formatar_br(valor_vermi_brl)}")
         st.caption(f"Equivalente a {moeda} {formatar_br(valor_vermi_eur)}")
+
+        st.info("ℹ️ **Nota sobre os arredondamentos:**\n\n"
+                "Os cálculos financeiros utilizam os valores exatos das cotações (com todas as casas decimais fornecidas pela API). "
+                "As quantidades exibidas na tela são arredondadas para duas casas decimais apenas para facilitar a leitura. "
+                "Pequenas diferenças entre uma multiplicação manual com os números da tela e o resultado apresentado são normais e decorrem exclusivamente desse arredondamento visual.")
 
         with st.expander("ℹ️ Como interpretar"):
             st.markdown(f"""
