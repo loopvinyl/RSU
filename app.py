@@ -369,25 +369,29 @@ Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor pre
 """)
 
 # =========================================================
-# 📊 Distribuição por tipo de destino (com checkbox e total)
+# 📊 Distribuição por tipo de destino (com checkbox e total DEDICADO)
 # =========================================================
 if municipio == municipios[0]:
     st.markdown("---")
     st.subheader(f"📊 Distribuição dos resíduos por tipo de destino ({ano_selecionado})")
-    st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
 
-    ocultar_transbordo_dist = st.checkbox("Ocultar transbordos", value=ocultar_transbordo, key="ocultar_transbordo_dist")
+    # Checkbox independente para esta seção
+    ocultar_transbordo_dist = st.checkbox("Ocultar transbordos", value=False, key="ocultar_transbordo_dist")
 
+    # Cria uma cópia local do DataFrame e aplica o filtro se necessário
+    df_dist = df_mun.copy()
     if ocultar_transbordo_dist:
-        df_mun_filtrado = df_mun[~df_mun[COL_DESTINO].apply(
+        df_dist = df_dist[~df_dist[COL_DESTINO].apply(
             lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
         )]
-    else:
-        df_mun_filtrado = df_mun.copy()
 
-    agg_destino = df_mun_filtrado.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
+    # Total recalculado após o filtro local
+    massa_total_dist = df_dist["MASSA_FLOAT"].sum()
+    st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total_dist)} t**")
+
+    agg_destino = df_dist.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
     agg_destino = agg_destino.sort_values("MASSA_FLOAT", ascending=False)
-    agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total) * 100 if massa_total > 0 else 0
+    agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total_dist) * 100 if massa_total_dist > 0 else 0
     agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
     agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
     st.dataframe(
