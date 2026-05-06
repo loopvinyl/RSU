@@ -704,14 +704,14 @@ with st.expander("💡 Inovação sugerida"):
 # ============================================================
 if municipio == municipios[0]:  # somente para "Brasil – Todos os municípios"
     st.markdown("---")
-    st.header("🏆 Ranking Municipal de Potencial da Vermicompostagem")
+    st.header("🏆 Mapeamento de Coleta Seletiva de Orgânicos")
     st.markdown("""
-    Com base nos dados de **coleta seletiva de resíduos orgânicos**, os municípios são ordenados
-    pelo total de emissões evitadas ao desviar esses resíduos dos aterros para **vermicompostagem**.
+    Lista de todos os municípios que declararam possuir **coleta seletiva de resíduos orgânicos**,
+    com a respectiva massa coletada e o destino atual.
     """)
 
-    with st.spinner("Calculando o ranking para todos os municípios... (pode levar alguns segundos)"):
-        # Utiliza df_clean (dados nacionais) e filtra apenas as rotas de coleta seletiva orgânica
+    with st.spinner("Consultando dados..."):
+        # Utiliza df_clean (dados nacionais)
         mask_organicos = df_clean[COL_TIPO_COLETA].astype(str).str.contains(
             "seletiva.*orgânico|orgânico.*seletiva", case=False, na=False, regex=True)
         df_org_ranking = df_clean[mask_organicos].copy()
@@ -719,84 +719,74 @@ if municipio == municipios[0]:  # somente para "Brasil – Todos os municípios"
         if df_org_ranking.empty:
             st.info("Nenhum município registrou coleta seletiva de resíduos orgânicos no período selecionado.")
         else:
-            # Adiciona coluna de massa float e MCF
             df_org_ranking["MASSA_FLOAT_RANK"] = pd.to_numeric(df_org_ranking[COL_MASSA], errors="coerce").fillna(0)
-            df_org_ranking["MCF"] = df_org_ranking[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
+            # Agrupa por município, UF e também pelo destino (para mostrar os destinos)
+            ranking_data = df_org_ranking.groupby([COL_MUNICIPIO, COL_UF, COL_DESTINO])["MASSA_FLOAT_RANK"].sum().reset_index()
 
-            # Filtra apenas registros enviados para destinos com MCF > 0 (aterro)
-            df_aterro_ranking = df_org_ranking[df_org_ranking["MCF"] > 0]
-
-            if df_aterro_ranking.empty:
-                st.info("Nenhum município destina seus resíduos orgânicos seletivos para aterros/licenciamentos.")
-            else:
-                # Agrupa por município e UF
-                ranking = []
-                for (mun, uf), grupo in df_aterro_ranking.groupby([COL_MUNICIPIO, COL_UF]):
-                    massa_total = grupo["MASSA_FLOAT_RANK"].sum()
-                    if massa_total <= 0:
-                        continue
-                    # MCF médio ponderado pela massa
-                    mcfs = grupo["MCF"].values
-                    massas = grupo["MASSA_FLOAT_RANK"].values
+            # Para cada município, vamos agregar os destinos e calcular o potencial para os que vão para aterro
+            mapeamento = []
+            for (mun, uf), grupo in ranking_data.groupby([COL_MUNICIPIO, COL_UF]):
+                massa_total = grupo["MASSA_FLOAT_RANK"].sum()
+                destinos = ", ".join(sorted(grupo[COL_DESTINO].unique()))
+                
+                # Verifica se há destinos com MCF > 0
+                grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
+                massa_aterro = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
+                
+                evitado_anual = 0.0
+                if massa_aterro > 0:
+                    # Calcula o potencial de vermicompostagem para a parcela que vai para aterro
+                    mcfs = grupo[grupo["MCF"] > 0]["MCF"].values
+                    massas = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].values
                     mcf_medio = np.average(mcfs, weights=massas)
-                    if mcf_medio <= 0:
-                        continue
-
-                    # Cálculo da linha de base (aterro)
-                    co2eq_aterro = calcular_co2eq_total_aterro_20anos(massa_total, mcf_medio, 'organico')
-                    # Cálculo da vermicompostagem
-                    massa_kg_dia = (massa_total * 1000) / 365
+                    co2eq_aterro = calcular_co2eq_total_aterro_20anos(massa_aterro, mcf_medio, 'organico')
+                    massa_kg_dia = (massa_aterro * 1000) / 365
                     ch4_v, n2o_v = calcular_emissoes_vermicompostagem_diarias(massa_kg_dia)
                     co2eq_vermi = (ch4_v.sum() * GWP_CH4_20 + n2o_v.sum() * GWP_N2O_20) / 1000
                     evitado_20anos = co2eq_aterro - co2eq_vermi
+                    evitado_anual = evitado_20anos / ANOS_PROJECAO
 
-                    if evitado_20anos > 0:
-                        evitado_anual = evitado_20anos / ANOS_PROJECAO
-                        ranking.append({
-                            "Município": mun,
-                            "UF": uf,
-                            "Massa (t/ano)": massa_total,
-                            "Emissões Evitadas (tCO₂e/ano)": evitado_anual,
-                            "Emissões Evitadas 20 anos (tCO₂e)": evitado_20anos
-                        })
+                mapeamento.append({
+                    "Município": mun,
+                    "UF": uf,
+                    "Massa Total (t/ano)": massa_total,
+                    "Massa para Aterro (t/ano)": massa_aterro,
+                    "Destino(s)": destinos,
+                    "Potencial Vermicompostagem (tCO₂e/ano)": evitado_anual
+                })
 
-                if not ranking:
-                    st.info("Não foi possível calcular emissões evitadas para nenhum município.")
-                else:
-                    df_rank = pd.DataFrame(ranking)
-                    df_rank = df_rank.sort_values("Emissões Evitadas (tCO₂e/ano)", ascending=False)
+            df_mapeamento = pd.DataFrame(mapeamento)
+            df_mapeamento = df_mapeamento.sort_values("Massa Total (t/ano)", ascending=False)
 
-                    # Adiciona valor financeiro (cotação atual)
-                    preco = st.session_state.preco_carbono
-                    cambio = st.session_state.taxa_cambio
-                    df_rank["Valor Anual (R$)"] = df_rank["Emissões Evitadas (tCO₂e/ano)"] * preco * cambio
-                    df_rank["Valor Anual (€)"] = df_rank["Emissões Evitadas (tCO₂e/ano)"] * preco
+            # Formatação
+            st.dataframe(
+                df_mapeamento.style.format({
+                    "Massa Total (t/ano)": lambda x: formatar_numero_br(x, 1),
+                    "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, 1),
+                    "Potencial Vermicompostagem (tCO₂e/ano)": lambda x: formatar_numero_br(x, 2)
+                }),
+                use_container_width=True,
+                height=600
+            )
 
-                    # Exibe os 50 maiores
-                    st.subheader("Top 50 Municípios")
-                    st.dataframe(
-                        df_rank.head(50).style.format({
-                            "Massa (t/ano)": lambda x: formatar_numero_br(x, 1),
-                            "Emissões Evitadas (tCO₂e/ano)": lambda x: formatar_numero_br(x, 2),
-                            "Emissões Evitadas 20 anos (tCO₂e)": lambda x: formatar_numero_br(x, 2),
-                            "Valor Anual (R$)": lambda x: formatar_numero_br(x, 2),
-                            "Valor Anual (€)": lambda x: formatar_numero_br(x, 2),
-                        }),
-                        use_container_width=True,
-                        height=600
-                    )
+            st.caption("""
+            - **Massa Total:** toda a massa declarada na coleta seletiva de orgânicos.
+            - **Massa para Aterro:** parcela que ainda é destinada a aterros (MCF > 0).
+            - **Potencial de Vermicompostagem:** emissões que seriam evitadas se a parcela enviada a aterro fosse tratada por vermicompostagem.
+            - Municípios que já tratam 100% do resíduo (compostagem, etc.) aparecem com potencial zero, indicando situação adequada.
+            """)
 
-                    # Gráfico de barras horizontal com os 10 maiores
-                    top10 = df_rank.head(10).copy()
-                    top10["Rótulo"] = top10["Município"] + " (" + top10["UF"] + ")"
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    ax.barh(top10["Rótulo"], top10["Emissões Evitadas (tCO₂e/ano)"], color='darkgreen')
-                    ax.set_xlabel("Emissões Evitadas (tCO₂e/ano)")
-                    ax.set_title("Top 10 Municípios – Potencial de Vermicompostagem")
-                    ax.invert_yaxis()
-                    st.pyplot(fig)
+            # Gráfico de barras com os 10 maiores potenciais
+            top10_pot = df_mapeamento[df_mapeamento["Potencial Vermicompostagem (tCO₂e/ano)"] > 0].head(10)
+            if not top10_pot.empty:
+                top10_pot["Rótulo"] = top10_pot["Município"] + " (" + top10_pot["UF"] + ")"
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.barh(top10_pot["Rótulo"], top10_pot["Potencial Vermicompostagem (tCO₂e/ano)"], color='darkgreen')
+                ax.set_xlabel("Potencial de Vermicompostagem (tCO₂e/ano)")
+                ax.set_title("Top 10 Municípios – Potencial de Vermicompostagem (apenas quem ainda envia para aterro)")
+                ax.invert_yaxis()
+                st.pyplot(fig)
 
-                    st.caption("Ranking baseado exclusivamente na coleta seletiva de resíduos orgânicos destinados a aterros. Outros resíduos orgânicos (grandes geradores, podas) não estão incluídos. Cotações do carbono atualizadas via Yahoo Finance.")
 else:
     # Se não for Brasil, a seção de ranking não aparece
     pass
