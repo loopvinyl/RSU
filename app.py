@@ -356,6 +356,7 @@ COL_MUNICIPIO = df.columns[2]      # será renomeado
 COL_TIPO_COLETA = df.columns[17]   # será renomeado
 COL_MASSA = df.columns[24]         # será renomeado
 COL_DESTINO = df.columns[28]       # Tipo de unidade de destino
+COL_UF = df.columns[3]             # UF
 
 df = df.rename(columns={
     COL_MUNICIPIO: "MUNICÍPIO",
@@ -404,7 +405,6 @@ st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
 
 df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna(0)
 
-# Resumo antes da tabela
 massa_total = df_mun["MASSA_FLOAT"].sum()
 st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
 st.markdown("""
@@ -412,7 +412,6 @@ A tabela abaixo exibe **cada rota de coleta** e seu respectivo destino, exatamen
 Nenhuma agregação ou filtro foi aplicado – os valores correspondem à massa anual coletada para cada rota e destino.
 """)
 
-# Tabela com todas as rotas
 tabela_destino = df_mun[[COL_CODIGO_ROTA, COL_TIPO_COLETA, COL_DESTINO, "MASSA_FLOAT"]].copy()
 tabela_destino = tabela_destino.rename(columns={
     COL_CODIGO_ROTA: "Código Rota",
@@ -423,7 +422,6 @@ tabela_destino = tabela_destino.rename(columns={
 tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
 
 st.dataframe(tabela_destino, use_container_width=True)
-
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
 with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
@@ -454,7 +452,7 @@ with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
     """)
 
 # ============================================================
-# ♻️ ORGÂNICOS (com resumo)
+# ♻️ ORGÂNICOS (com resumo) – código mantido
 # ============================================================
 st.markdown("---")
 st.subheader("♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos")
@@ -595,7 +593,7 @@ else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🌳 PODAS E GALHADAS (com resumo)
+# 🌳 PODAS E GALHADAS (com resumo) – código mantido
 # ============================================================
 st.markdown("---")
 st.subheader("🌳 Destinação das podas e galhadas de áreas verdes públicas")
@@ -691,13 +689,121 @@ if not df_podas.empty:
 else:
     st.info("Não há dados de podas e galhadas.")
 
+# ============================================================
+# 💡 Inovação sugerida (atualizada)
+# ============================================================
 with st.expander("💡 Inovação sugerida"):
     st.markdown("""
     **Próximo passo:** classificar os municípios por **potencial total de emissões evitadas**
-    e gerar um **ranking municipal dinâmico**, identificando onde um projeto de compostagem
+    e gerar um **ranking municipal dinâmico**, identificando onde um projeto de vermicompostagem
     teria maior impacto ambiental e financeiro.
     """)
 
+# ============================================================
+# 🏆 RANKING MUNICIPAL DE POTENCIAL DA VERMICOMPOSTAGEM
+# ============================================================
+if municipio == municipios[0]:  # somente para "Brasil – Todos os municípios"
+    st.markdown("---")
+    st.header("🏆 Ranking Municipal de Potencial da Vermicompostagem")
+    st.markdown("""
+    Com base nos dados de **coleta seletiva de resíduos orgânicos**, os municípios são ordenados
+    pelo total de emissões evitadas ao desviar esses resíduos dos aterros para **vermicompostagem**.
+    """)
+
+    with st.spinner("Calculando o ranking para todos os municípios... (pode levar alguns segundos)"):
+        # Utiliza df_clean (dados nacionais) e filtra apenas as rotas de coleta seletiva orgânica
+        mask_organicos = df_clean[COL_TIPO_COLETA].astype(str).str.contains(
+            "seletiva.*orgânico|orgânico.*seletiva", case=False, na=False, regex=True)
+        df_org_ranking = df_clean[mask_organicos].copy()
+
+        if df_org_ranking.empty:
+            st.info("Nenhum município registrou coleta seletiva de resíduos orgânicos no período selecionado.")
+        else:
+            # Adiciona coluna de massa float e MCF
+            df_org_ranking["MASSA_FLOAT_RANK"] = pd.to_numeric(df_org_ranking[COL_MASSA], errors="coerce").fillna(0)
+            df_org_ranking["MCF"] = df_org_ranking[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
+
+            # Filtra apenas registros enviados para destinos com MCF > 0 (aterro)
+            df_aterro_ranking = df_org_ranking[df_org_ranking["MCF"] > 0]
+
+            if df_aterro_ranking.empty:
+                st.info("Nenhum município destina seus resíduos orgânicos seletivos para aterros/licenciamentos.")
+            else:
+                # Agrupa por município e UF
+                ranking = []
+                for (mun, uf), grupo in df_aterro_ranking.groupby([COL_MUNICIPIO, COL_UF]):
+                    massa_total = grupo["MASSA_FLOAT_RANK"].sum()
+                    if massa_total <= 0:
+                        continue
+                    # MCF médio ponderado pela massa
+                    mcfs = grupo["MCF"].values
+                    massas = grupo["MASSA_FLOAT_RANK"].values
+                    mcf_medio = np.average(mcfs, weights=massas)
+                    if mcf_medio <= 0:
+                        continue
+
+                    # Cálculo da linha de base (aterro)
+                    co2eq_aterro = calcular_co2eq_total_aterro_20anos(massa_total, mcf_medio, 'organico')
+                    # Cálculo da vermicompostagem
+                    massa_kg_dia = (massa_total * 1000) / 365
+                    ch4_v, n2o_v = calcular_emissoes_vermicompostagem_diarias(massa_kg_dia)
+                    co2eq_vermi = (ch4_v.sum() * GWP_CH4_20 + n2o_v.sum() * GWP_N2O_20) / 1000
+                    evitado_20anos = co2eq_aterro - co2eq_vermi
+
+                    if evitado_20anos > 0:
+                        evitado_anual = evitado_20anos / ANOS_PROJECAO
+                        ranking.append({
+                            "Município": mun,
+                            "UF": uf,
+                            "Massa (t/ano)": massa_total,
+                            "Emissões Evitadas (tCO₂e/ano)": evitado_anual,
+                            "Emissões Evitadas 20 anos (tCO₂e)": evitado_20anos
+                        })
+
+                if not ranking:
+                    st.info("Não foi possível calcular emissões evitadas para nenhum município.")
+                else:
+                    df_rank = pd.DataFrame(ranking)
+                    df_rank = df_rank.sort_values("Emissões Evitadas (tCO₂e/ano)", ascending=False)
+
+                    # Adiciona valor financeiro (cotação atual)
+                    preco = st.session_state.preco_carbono
+                    cambio = st.session_state.taxa_cambio
+                    df_rank["Valor Anual (R$)"] = df_rank["Emissões Evitadas (tCO₂e/ano)"] * preco * cambio
+                    df_rank["Valor Anual (€)"] = df_rank["Emissões Evitadas (tCO₂e/ano)"] * preco
+
+                    # Exibe os 50 maiores
+                    st.subheader("Top 50 Municípios")
+                    st.dataframe(
+                        df_rank.head(50).style.format({
+                            "Massa (t/ano)": lambda x: formatar_numero_br(x, 1),
+                            "Emissões Evitadas (tCO₂e/ano)": lambda x: formatar_numero_br(x, 2),
+                            "Emissões Evitadas 20 anos (tCO₂e)": lambda x: formatar_numero_br(x, 2),
+                            "Valor Anual (R$)": lambda x: formatar_numero_br(x, 2),
+                            "Valor Anual (€)": lambda x: formatar_numero_br(x, 2),
+                        }),
+                        use_container_width=True,
+                        height=600
+                    )
+
+                    # Gráfico de barras horizontal com os 10 maiores
+                    top10 = df_rank.head(10).copy()
+                    top10["Rótulo"] = top10["Município"] + " (" + top10["UF"] + ")"
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.barh(top10["Rótulo"], top10["Emissões Evitadas (tCO₂e/ano)"], color='darkgreen')
+                    ax.set_xlabel("Emissões Evitadas (tCO₂e/ano)")
+                    ax.set_title("Top 10 Municípios – Potencial de Vermicompostagem")
+                    ax.invert_yaxis()
+                    st.pyplot(fig)
+
+                    st.caption("Ranking baseado exclusivamente na coleta seletiva de resíduos orgânicos destinados a aterros. Outros resíduos orgânicos (grandes geradores, podas) não estão incluídos. Cotações do carbono atualizadas via Yahoo Finance.")
+else:
+    # Se não for Brasil, a seção de ranking não aparece
+    pass
+
+# =========================================================
+# Rodapé (sem alteração)
+# =========================================================
 st.markdown("---")
 st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
