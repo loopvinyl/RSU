@@ -326,20 +326,17 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# CHECKBOX PARA OCULTAR TRANSBORDOS
-# =========================================================
-ocultar_transbordo = st.checkbox("Ocultar transbordos", value=False)
-if ocultar_transbordo:
-    # Remove linhas cujo destino contenha "transbordo" (normalizado)
-    df_mun = df_mun[~df_mun[COL_DESTINO].apply(
-        lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
-    )]
-
-# =========================================================
-# 🗺️ Destinação Final (com ano e "Tipo de Unidade (SNIS)")
+# 🗺️ Destinação Final (com checkbox interno)
 # =========================================================
 st.markdown("---")
 st.subheader(f"🗺️ Para onde o resíduo está indo? (Destinação Final, {ano_selecionado})")
+
+ocultar_transbordo = st.checkbox("Ocultar transbordos", value=False)
+
+if ocultar_transbordo:
+    df_mun = df_mun[~df_mun[COL_DESTINO].apply(
+        lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+    )]
 
 df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna(0)
 
