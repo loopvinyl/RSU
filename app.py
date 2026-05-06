@@ -189,34 +189,28 @@ def carregar_perfis():
 # =========================================================
 def calcular_emissoes_aterro_lote_unico(massa_total_kg, mcf, k_ano, temp_C, doc, dias=DIAS_PROJECAO):
     docf = 0.0147 * temp_C + 0.28
-    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)  # F=0.5, OX=0.1, Ri=0
+    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)
 
-    # Kernel diário do CH4 (fração do potencial emitida a cada dia)
     t = np.arange(1, dias + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
 
-    # Emissões de CH4 do lote
     ch4_diario = massa_total_kg * ch4_pot_por_kg * kernel_ch4
     ch4_diario *= PHI_BASELINE * (1 - CAPTURA_CH4)
 
-    # N2O – modelo simplificado: aplica o perfil anual a um lote único
     n2o_diario = np.zeros(dias)
-    # Fator de emissão base (kg N2O / kg resíduo) – Wang et al. 2017
     opening = np.clip((100.0 / (massa_total_kg / 365)) * (8.0 / 24), 0.0, 1.0) if massa_total_kg > 0 else 0.0
     E_avg = opening * 1.91 + (1 - opening) * 2.15
     E_avg *= (1 - UMIDADE_PADRAO) / (1 - 0.55)
-    fator_n2o_por_kg = (E_avg * (44/28) / 1_000_000)  # kg N2O / kg resíduo
-    # Distribui nos 5 primeiros anos conforme o perfil
+    fator_n2o_por_kg = (E_avg * (44/28) / 1_000_000)
     perfil_anual = np.array([PROFILE_N2O_LANDFILL.get(y, 0) for y in range(1, 6)])
     for ano_idx, peso in enumerate(perfil_anual):
         dia_inicio = ano_idx * 365
         dia_fim = min((ano_idx + 1) * 365, dias)
         n2o_diario[dia_inicio:dia_fim] = (massa_total_kg * fator_n2o_por_kg * peso) / 365
 
-    # Pré‑descarte (ocorre nos 3 primeiros dias após o lote)
     ch4_pre = np.zeros(dias)
     n2o_pre = np.zeros(dias)
-    ch4_pre[:3] = massa_total_kg * CH4_PRE_KG_POR_KG_DIA / 3  # simplificação
+    ch4_pre[:3] = massa_total_kg * CH4_PRE_KG_POR_KG_DIA / 3
     for d_atraso, frac in PROFILE_N2O_PRE.items():
         dia = d_atraso - 1
         if dia < dias:
@@ -228,16 +222,13 @@ def calcular_emissoes_aterro_lote_unico(massa_total_kg, mcf, k_ano, temp_C, doc,
     return ch4_total, n2o_total, co2eq_dia
 
 def calcular_emissoes_vermicompostagem_lote_unico(massa_total_kg):
-    """Retorna emissões diárias de CH4 e N2O para um lote único tratado por vermicompostagem."""
     dias = DIAS_PROJECAO
     ch4_dia = np.zeros(dias)
     n2o_dia = np.zeros(dias)
 
-    # Emissões concentradas nos 50 dias de tratamento
     ch4_total_lote = massa_total_kg * TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12)
     n2o_total_lote = massa_total_kg * TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28)
 
-    # Distribui conforme os perfis diários
     for d in range(DIAS_COMPOSTAGEM_ORGANICO):
         ch4_dia[d] = ch4_total_lote * p_ch4_vermi_org[d]
         n2o_dia[d] = n2o_total_lote * p_n2o_vermi_org[d]
@@ -260,7 +251,7 @@ def calcular_co2eq_vermi_lote_20anos(massa_t_ano):
     return co2eq
 
 # =========================================================
-# MCF por destino (mantida)
+# MCF por destino
 # =========================================================
 def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     if pd.isna(destino):
@@ -277,7 +268,7 @@ def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     return mcf_base
 
 # =========================================================
-# Carga e preparação dos dados (mantida)
+# Carga e preparação dos dados
 # =========================================================
 @st.cache_data
 def load_data(ano):
@@ -335,7 +326,7 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (com resumo) – mantida
+# 🗺️ Destinação Final
 # =========================================================
 st.markdown("---")
 st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
@@ -373,7 +364,7 @@ if municipio == municipios[0]:
     st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final).")
 
 # ============================================================
-# ♻️ ORGÂNICOS (com novo cálculo de lote único)
+# ♻️ ORGÂNICOS
 # ============================================================
 st.markdown("---")
 st.subheader("♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos")
@@ -413,30 +404,33 @@ if not df_organicos.empty:
                 "Destino": row[COL_DESTINO],
                 "Massa (t)": formatar_numero_br(massa_t),
                 "MCF": formatar_numero_br(mcf, 2),
-                "CO₂e aterro 20 anos": formatar_numero_br(co2eq_aterro, 1)
+                "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro, 1)
             })
 
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
+
         co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro_total)
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))
         col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total, 1)} tCO₂e")
-        col3.metric("Emissões Evitadas (Vermicompostagem)", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
+        col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi, 1)} tCO₂e")
+        col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
 
         preco = st.session_state.preco_carbono
         cambio = st.session_state.taxa_cambio
         valor_brl = calcular_valor_creditos(evitado_vermi, preco, "R$", cambio)
         st.metric("💰 Valor dos créditos (R$)", f"R$ {formatar_br(valor_brl)}")
+
     else:
         st.success("✅ Nenhum orgânico destinado a aterro.")
 else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🏆 RANKING MUNICIPAL (com lote único)
+# 🏆 RANKING MUNICIPAL
 # ============================================================
 if municipio == municipios[0]:
     st.markdown("---")
@@ -467,7 +461,7 @@ if municipio == municipios[0]:
                 
                 evitado_20anos = 0.0
                 if massa_aterro > 0:
-                    co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_aterro, 0.8)  # MCF médio simplificado
+                    co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_aterro, 0.8)
                     co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
 
