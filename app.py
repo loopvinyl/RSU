@@ -160,14 +160,6 @@ N2O_N_FRAC_YANG_ORGANICO = 0.92 / 100
 N2O_N_FRAC_THERMO_ORGANICO = 0.0196
 DIAS_COMPOSTAGEM_ORGANICO = 50
 
-T_PODAS, DOC_PODAS, k_ano_PODAS = 25.0, 0.10, 0.03
-TOC_PODAS, TN_PODAS = 0.50, 5.0 / 1000
-CH4_C_FRAC_YANG_PODAS = 0.02 / 100
-CH4_C_FRAC_THERMO_PODAS = 0.001
-N2O_N_FRAC_YANG_PODAS = 0.10 / 100
-N2O_N_FRAC_THERMO_PODAS = 0.005
-DIAS_COMPOSTAGEM_PODAS = 90
-
 # Perfis (já normalizados)
 def carregar_perfis():
     p_ch4_vermi_org = np.array([
@@ -188,138 +180,87 @@ def carregar_perfis():
     ])
     p_n2o_vermi_org /= p_n2o_vermi_org.sum()
 
-    p_ch4_thermo_org = p_ch4_vermi_org.copy()
+    return (p_ch4_vermi_org, p_n2o_vermi_org)
 
-    p_n2o_thermo_org = np.array([
-        0.10, 0.08, 0.15, 0.05, 0.03, 0.04, 0.05, 0.07, 0.10, 0.12,
-        0.15, 0.18, 0.20, 0.18, 0.15, 0.12, 0.10, 0.08, 0.06, 0.05,
-        0.04, 0.03, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
-        0.005, 0.005, 0.005, 0.005, 0.005, 0.002, 0.002, 0.002, 0.002, 0.002,
-        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001
-    ])
-    p_n2o_thermo_org /= p_n2o_thermo_org.sum()
-
-    p_ch4_thermo_podas = np.array([
-        0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
-        0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.18,
-        0.18, 0.17, 0.16, 0.15, 0.14, 0.13, 0.12, 0.11, 0.10, 0.09,
-        0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.03, 0.03, 0.03, 0.03,
-        0.03, 0.03, 0.03, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02,
-        0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
-        0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
-        0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
-        0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01
-    ])
-    p_ch4_thermo_podas /= p_ch4_thermo_podas.sum()
-
-    p_n2o_thermo_podas = np.array([
-        0.05, 0.04, 0.07, 0.02, 0.01, 0.02, 0.02, 0.03, 0.04, 0.06,
-        0.08, 0.09, 0.10, 0.09, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02,
-        0.01, 0.01, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005,
-        0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001,
-        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,
-        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,
-        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,
-        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001,
-        0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001
-    ])
-    p_n2o_thermo_podas /= p_n2o_thermo_podas.sum()
-
-    return (p_ch4_vermi_org, p_n2o_vermi_org,
-            p_ch4_thermo_org, p_n2o_thermo_org,
-            p_ch4_thermo_podas, p_n2o_thermo_podas)
-
-(p_ch4_vermi_org, p_n2o_vermi_org,
- p_ch4_thermo_org, p_n2o_thermo_org,
- p_ch4_thermo_podas, p_n2o_thermo_podas) = carregar_perfis()
+(p_ch4_vermi_org, p_n2o_vermi_org) = carregar_perfis()
 
 # =========================================================
-# FUNÇÕES DE CÁLCULO
+# FUNÇÕES DE CÁLCULO – LOTE ÚNICO
 # =========================================================
-def calcular_emissoes_aterro_tco2eq(massa_kg_dia, mcf, k_ano, temp_C, doc, dias=DIAS_PROJECAO):
+def calcular_emissoes_aterro_lote_unico(massa_total_kg, mcf, k_ano, temp_C, doc, dias=DIAS_PROJECAO):
     docf = 0.0147 * temp_C + 0.28
-    ch4_pot = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)
-    ch4_diario_base = massa_kg_dia * ch4_pot
+    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)  # F=0.5, OX=0.1, Ri=0
+
+    # Kernel diário do CH4 (fração do potencial emitida a cada dia)
     t = np.arange(1, dias + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
-    ch4_decaido = fftconvolve(np.ones(dias) * ch4_diario_base, kernel_ch4, mode='full')[:dias]
-    ch4_decaido *= PHI_BASELINE * (1 - CAPTURA_CH4)
 
-    opening = np.clip((100.0 / massa_kg_dia) * (8.0 / 24), 0.0, 1.0)
+    # Emissões de CH4 do lote
+    ch4_diario = massa_total_kg * ch4_pot_por_kg * kernel_ch4
+    ch4_diario *= PHI_BASELINE * (1 - CAPTURA_CH4)
+
+    # N2O – modelo simplificado: aplica o perfil anual a um lote único
+    n2o_diario = np.zeros(dias)
+    # Fator de emissão base (kg N2O / kg resíduo) – Wang et al. 2017
+    opening = np.clip((100.0 / (massa_total_kg / 365)) * (8.0 / 24), 0.0, 1.0) if massa_total_kg > 0 else 0.0
     E_avg = opening * 1.91 + (1 - opening) * 2.15
     E_avg *= (1 - UMIDADE_PADRAO) / (1 - 0.55)
-    n2o_diario_base = (E_avg * (44/28) / 1_000_000) * massa_kg_dia
-    kernel_n2o = np.array([PROFILE_N2O_LANDFILL.get(d, 0) for d in range(1, 6)])
-    n2o_decaido = fftconvolve(np.full(dias, n2o_diario_base), kernel_n2o, mode='full')[:dias]
+    fator_n2o_por_kg = (E_avg * (44/28) / 1_000_000)  # kg N2O / kg resíduo
+    # Distribui nos 5 primeiros anos conforme o perfil
+    perfil_anual = np.array([PROFILE_N2O_LANDFILL.get(y, 0) for y in range(1, 6)])
+    for ano_idx, peso in enumerate(perfil_anual):
+        dia_inicio = ano_idx * 365
+        dia_fim = min((ano_idx + 1) * 365, dias)
+        n2o_diario[dia_inicio:dia_fim] = (massa_total_kg * fator_n2o_por_kg * peso) / 365
 
-    ch4_pre = np.full(dias, massa_kg_dia * CH4_PRE_KG_POR_KG_DIA)
+    # Pré‑descarte (ocorre nos 3 primeiros dias após o lote)
+    ch4_pre = np.zeros(dias)
     n2o_pre = np.zeros(dias)
-    for dia_entrada in range(dias):
-        for d_atraso, frac in PROFILE_N2O_PRE.items():
-            dia_emissao = dia_entrada + d_atraso - 1
-            if dia_emissao < dias:
-                n2o_pre[dia_emissao] += massa_kg_dia * N2O_PRE_KG_POR_KG_DIA * frac
+    ch4_pre[:3] = massa_total_kg * CH4_PRE_KG_POR_KG_DIA / 3  # simplificação
+    for d_atraso, frac in PROFILE_N2O_PRE.items():
+        dia = d_atraso - 1
+        if dia < dias:
+            n2o_pre[dia] += massa_total_kg * N2O_PRE_KG_POR_KG_DIA * frac
 
-    ch4_total = ch4_decaido + ch4_pre
-    n2o_total = n2o_decaido + n2o_pre
-    co2eq = (ch4_total * GWP_CH4_20 + n2o_total * GWP_N2O_20) / 1000.0
-    return ch4_total, n2o_total, co2eq
+    ch4_total = ch4_diario + ch4_pre
+    n2o_total = n2o_diario + n2o_pre
+    co2eq_dia = (ch4_total * GWP_CH4_20 + n2o_total * GWP_N2O_20) / 1000.0
+    return ch4_total, n2o_total, co2eq_dia
 
-def calcular_co2eq_total_aterro_20anos(massa_t_ano, mcf, tipo_residuo):
+def calcular_emissoes_vermicompostagem_lote_unico(massa_total_kg):
+    """Retorna emissões diárias de CH4 e N2O para um lote único tratado por vermicompostagem."""
+    dias = DIAS_PROJECAO
+    ch4_dia = np.zeros(dias)
+    n2o_dia = np.zeros(dias)
+
+    # Emissões concentradas nos 50 dias de tratamento
+    ch4_total_lote = massa_total_kg * TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12)
+    n2o_total_lote = massa_total_kg * TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28)
+
+    # Distribui conforme os perfis diários
+    for d in range(DIAS_COMPOSTAGEM_ORGANICO):
+        ch4_dia[d] = ch4_total_lote * p_ch4_vermi_org[d]
+        n2o_dia[d] = n2o_total_lote * p_n2o_vermi_org[d]
+
+    return ch4_dia, n2o_dia
+
+def calcular_co2eq_aterro_lote_20anos(massa_t_ano, mcf):
     if massa_t_ano <= 0 or mcf <= 0:
         return 0.0
-    if tipo_residuo == 'podas':
-        k, doc, temp = k_ano_PODAS, DOC_PODAS, T_PODAS
-    else:
-        k, doc, temp = k_ano_ORGANICO, DOC_ORGANICO, T_ORGANICO
-    massa_kg_dia = (massa_t_ano * 1000) / 365.0
-    _, _, co2eq_dia = calcular_emissoes_aterro_tco2eq(massa_kg_dia, mcf, k, temp, doc)
+    massa_kg = massa_t_ano * 1000
+    _, _, co2eq_dia = calcular_emissoes_aterro_lote_unico(massa_kg, mcf, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO)
     return co2eq_dia.sum()
 
-def calcular_ch4_total_aterro_20anos(massa_t_ano, mcf, tipo_residuo):
-    if massa_t_ano <= 0 or mcf <= 0:
+def calcular_co2eq_vermi_lote_20anos(massa_t_ano):
+    if massa_t_ano <= 0:
         return 0.0
-    doc = DOC_ORGANICO if tipo_residuo == 'organico' else DOC_PODAS
-    temp = T_ORGANICO if tipo_residuo == 'organico' else T_PODAS
-    docf = 0.0147 * temp + 0.28
-    ch4_pot = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)
-    massa_kg_dia = (massa_t_ano * 1000) / 365
-    ch4_diario = massa_kg_dia * ch4_pot
-    t = np.arange(1, DIAS_PROJECAO + 1, dtype=float)
-    k = k_ano_ORGANICO if tipo_residuo == 'organico' else k_ano_PODAS
-    kernel = np.exp(-k * (t - 1) / 365.0) - np.exp(-k * t / 365.0)
-    emissoes = fftconvolve(np.ones(DIAS_PROJECAO) * ch4_diario, kernel, mode='full')[:DIAS_PROJECAO]
-    return emissoes.sum() / 1000
-
-def calcular_emissoes_compostagem_diarias(massa_kg_dia, tipo_residuo):
-    if tipo_residuo == 'organico':
-        TOC, TN = TOC_ORGANICO, TN_ORGANICO
-        f_ch4, f_n2o = CH4_C_FRAC_THERMO_ORGANICO, N2O_N_FRAC_THERMO_ORGANICO
-        p_ch4, p_n2o = p_ch4_thermo_org, p_n2o_thermo_org
-    else:
-        TOC, TN = TOC_PODAS, TN_PODAS
-        f_ch4, f_n2o = CH4_C_FRAC_THERMO_PODAS, N2O_N_FRAC_THERMO_PODAS
-        p_ch4, p_n2o = p_ch4_thermo_podas, p_n2o_thermo_podas
-    ch4_por_lote = massa_kg_dia * TOC * f_ch4 * (16/12)
-    n2o_por_lote = massa_kg_dia * TN * f_n2o * (44/28)
-    entradas = np.ones(DIAS_PROJECAO, dtype=float)
-    ch4_dia = fftconvolve(entradas, p_ch4 * ch4_por_lote, mode='full')[:DIAS_PROJECAO]
-    n2o_dia = fftconvolve(entradas, p_n2o * n2o_por_lote, mode='full')[:DIAS_PROJECAO]
-    return ch4_dia, n2o_dia
-
-def calcular_emissoes_vermicompostagem_diarias(massa_kg_dia):
-    TOC, TN = TOC_ORGANICO, TN_ORGANICO
-    f_ch4, f_n2o = CH4_C_FRAC_YANG_ORGANICO, N2O_N_FRAC_YANG_ORGANICO
-    p_ch4, p_n2o = p_ch4_vermi_org, p_n2o_vermi_org
-    ch4_por_lote = massa_kg_dia * TOC * f_ch4 * (16/12)
-    n2o_por_lote = massa_kg_dia * TN * f_n2o * (44/28)
-    entradas = np.ones(DIAS_PROJECAO, dtype=float)
-    ch4_dia = fftconvolve(entradas, p_ch4 * ch4_por_lote, mode='full')[:DIAS_PROJECAO]
-    n2o_dia = fftconvolve(entradas, p_n2o * n2o_por_lote, mode='full')[:DIAS_PROJECAO]
-    return ch4_dia, n2o_dia
+    massa_kg = massa_t_ano * 1000
+    ch4, n2o = calcular_emissoes_vermicompostagem_lote_unico(massa_kg)
+    co2eq = (ch4.sum() * GWP_CH4_20 + n2o.sum() * GWP_N2O_20) / 1000.0
+    return co2eq
 
 # =========================================================
-# MCF por destino
+# MCF por destino (mantida)
 # =========================================================
 def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     if pd.isna(destino):
@@ -333,12 +274,10 @@ def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
         mcf_base = 0.4
     else:
         mcf_base = 0.0
-    if tipo_residuo == 'podas' and mcf_base > 0:
-        return mcf_base * 0.5
     return mcf_base
 
 # =========================================================
-# Carga e preparação dos dados
+# Carga e preparação dos dados (mantida)
 # =========================================================
 @st.cache_data
 def load_data(ano):
@@ -350,13 +289,12 @@ def load_data(ano):
 
 df = load_data(ano_selecionado)
 
-# Definição de colunas principais
-COL_CODIGO_ROTA = df.columns[16]   # Código da rota (ex.: 3543402DEST001)
-COL_MUNICIPIO = df.columns[2]      # será renomeado
-COL_TIPO_COLETA = df.columns[17]   # será renomeado
-COL_MASSA = df.columns[24]         # será renomeado
-COL_DESTINO = df.columns[28]       # Tipo de unidade de destino
-COL_UF = df.columns[3]             # UF
+COL_CODIGO_ROTA = df.columns[16]
+COL_MUNICIPIO = df.columns[2]
+COL_TIPO_COLETA = df.columns[17]
+COL_MASSA = df.columns[24]
+COL_DESTINO = df.columns[28]
+COL_UF = df.columns[3]
 
 df = df.rename(columns={
     COL_MUNICIPIO: "MUNICÍPIO",
@@ -364,7 +302,6 @@ df = df.rename(columns={
     COL_MASSA: "MASSA_COLETADA"
 })
 
-# Atualiza as referências para os nomes renomeados
 COL_MUNICIPIO = "MUNICÍPIO"
 COL_TIPO_COLETA = "TIPO_COLETA_EXECUTADA"
 COL_MASSA = "MASSA_COLETADA"
@@ -398,7 +335,7 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (com resumo)
+# 🗺️ Destinação Final (com resumo) – mantida
 # =========================================================
 st.markdown("---")
 st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
@@ -424,24 +361,19 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
-# NOVA SEÇÃO: Agregação por tipo de destino (somente para Brasil)
 if municipio == municipios[0]:
     st.markdown("---")
     st.subheader("📊 Distribuição dos resíduos por tipo de destino")
-    st.markdown("""
-    Abaixo, a soma das massas **agrupadas por tipo de destino**, ordenadas da maior para a menor,
-    com o respectivo percentual do total coletado.
-    """)
     agg_destino = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
     agg_destino = agg_destino.sort_values("MASSA_FLOAT", ascending=False)
     agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total) * 100
     agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
     agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
     st.dataframe(agg_destino[[COL_DESTINO, "Massa (t)", "Percentual (%)"]], use_container_width=True)
-    st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final), conforme explicado anteriormente.")
+    st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final).")
 
 # ============================================================
-# ♻️ ORGÂNICOS (ajustado)
+# ♻️ ORGÂNICOS (com novo cálculo de lote único)
 # ============================================================
 st.markdown("---")
 st.subheader("♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos")
@@ -468,68 +400,50 @@ if not df_organicos.empty:
 
     st.subheader("🔥 Emissões detalhadas (Orgânicos)")
     df_org_dest["MCF"] = df_org_dest[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
-    resultados, massas_num, mcfs_num = [], [], []
-    co2eq_aterro_total, massa_aterro_total = 0.0, 0.0
+    resultados = []
+    co2eq_aterro_total = 0.0
+    massa_aterro_total = 0.0
     for _, row in df_org_dest.iterrows():
         massa_t, mcf = row["MASSA_FLOAT"], row["MCF"]
         if mcf > 0 and massa_t > 0:
-            co2 = calcular_co2eq_total_aterro_20anos(massa_t, mcf, 'organico')
-            ch4 = calcular_ch4_total_aterro_20anos(massa_t, mcf, 'organico')
-            co2eq_aterro_total += co2
+            co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_t, mcf)
+            co2eq_aterro_total += co2eq_aterro
             massa_aterro_total += massa_t
-            massas_num.append(massa_t)
-            mcfs_num.append(mcf)
             resultados.append({
                 "Destino": row[COL_DESTINO],
                 "Massa (t)": formatar_numero_br(massa_t),
                 "MCF": formatar_numero_br(mcf, 2),
-                "CO₂e (t) 20 anos": formatar_numero_br(co2, 1),
-                "CH₄ (t) 20 anos": formatar_numero_br(ch4, 3),
-                "Tipo de Aterro": classificar_tipo_aterro(mcf)
+                "CO₂e aterro 20 anos": formatar_numero_br(co2eq_aterro, 1)
             })
+
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
-        massa_kg_dia = (massa_aterro_total * 1000) / 365
-        ch4_vermi, n2o_vermi = calcular_emissoes_vermicompostagem_diarias(massa_kg_dia)
-        co2eq_vermi = (ch4_vermi.sum() * GWP_CH4_20 + n2o_vermi.sum() * GWP_N2O_20) / 1000
+        co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro_total)
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))
-        col2.metric("CO₂e do aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total, 1)} tCO₂e",
-                    help="CH₄ + N₂O + pré‑descarte, φ=0,85")
-        col3.metric("Emissões Evitadas da Vermicompostagem", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
-        st.info(f"**Metodologia (tco2eq):** Aterro: CH₄+N₂O; φ=0,85; k={k_ano_ORGANICO} ano⁻¹. Vermicompostagem: CH₄+N₂O (perfis diários).")
+        col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total, 1)} tCO₂e")
+        col3.metric("Emissões Evitadas (Vermicompostagem)", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
 
-        # Potencial de Créditos de Carbono em R$
         preco = st.session_state.preco_carbono
         cambio = st.session_state.taxa_cambio
-        valor_vermi_eur = calcular_valor_creditos(evitado_vermi, preco, "€")
-        valor_vermi_brl = calcular_valor_creditos(evitado_vermi, preco, "R$", cambio)
-
-        st.markdown("---")
-        st.subheader("💰 Potencial de Créditos de Carbono (Vermicompostagem)")
-        st.metric("Valor total (R$)", f"R$ {formatar_br(valor_vermi_brl)}")
-        with st.expander("ℹ️ Como interpretar"):
-            st.markdown(f"""
-            - **Emissões evitadas:** {formatar_numero_br(evitado_vermi, 1)} tCO₂e
-            - **Preço do carbono:** € {formatar_br(preco)}/tCO₂e
-            - **Câmbio:** R$ {formatar_br(cambio)}/€
-            """)
+        valor_brl = calcular_valor_creditos(evitado_vermi, preco, "R$", cambio)
+        st.metric("💰 Valor dos créditos (R$)", f"R$ {formatar_br(valor_brl)}")
     else:
         st.success("✅ Nenhum orgânico destinado a aterro.")
 else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🏆 RANKING MUNICIPAL DE POTENCIAL DA VERMICOMPOSTAGEM
+# 🏆 RANKING MUNICIPAL (com lote único)
 # ============================================================
 if municipio == municipios[0]:
     st.markdown("---")
     st.header("🏆 Mapeamento de Coleta Seletiva de Orgânicos")
     st.markdown("""
     Lista de todos os municípios que declararam possuir **coleta seletiva de resíduos orgânicos**,
-    com a respectiva massa coletada e o destino atual.
+    com a massa e o potencial de vermicompostagem (lote único).
     """)
 
     with st.spinner("Consultando dados..."):
@@ -538,7 +452,7 @@ if municipio == municipios[0]:
         df_org_ranking = df_clean[mask_organicos].copy()
 
         if df_org_ranking.empty:
-            st.info("Nenhum município registrou coleta seletiva de resíduos orgânicos no período selecionado.")
+            st.info("Nenhum município registrou coleta seletiva de resíduos orgânicos.")
         else:
             df_org_ranking["MASSA_FLOAT_RANK"] = pd.to_numeric(df_org_ranking[COL_MASSA], errors="coerce").fillna(0)
             ranking_data = df_org_ranking.groupby([COL_MUNICIPIO, COL_UF, COL_DESTINO])["MASSA_FLOAT_RANK"].sum().reset_index()
@@ -551,17 +465,11 @@ if municipio == municipios[0]:
                 grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
                 massa_aterro = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
                 
-                evitado_anual = 0.0
+                evitado_20anos = 0.0
                 if massa_aterro > 0:
-                    mcfs = grupo[grupo["MCF"] > 0]["MCF"].values
-                    massas = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].values
-                    mcf_medio = np.average(mcfs, weights=massas)
-                    co2eq_aterro = calcular_co2eq_total_aterro_20anos(massa_aterro, mcf_medio, 'organico')
-                    massa_kg_dia = (massa_aterro * 1000) / 365
-                    ch4_v, n2o_v = calcular_emissoes_vermicompostagem_diarias(massa_kg_dia)
-                    co2eq_vermi = (ch4_v.sum() * GWP_CH4_20 + n2o_v.sum() * GWP_N2O_20) / 1000
+                    co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_aterro, 0.8)  # MCF médio simplificado
+                    co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
-                    evitado_anual = evitado_20anos / ANOS_PROJECAO
 
                 mapeamento.append({
                     "Município": mun,
@@ -569,38 +477,29 @@ if municipio == municipios[0]:
                     "Massa Total (t/ano)": massa_total,
                     "Massa para Aterro (t/ano)": massa_aterro,
                     "Destino(s)": destinos,
-                    "Potencial Vermicompostagem (tCO₂e/ano)": evitado_anual
+                    "Potencial Vermicompostagem (tCO₂e/ano)": evitado_20anos / ANOS_PROJECAO
                 })
 
-            df_mapeamento = pd.DataFrame(mapeamento)
-            df_mapeamento = df_mapeamento.sort_values("Massa Total (t/ano)", ascending=False)
+            df_mapeamento = pd.DataFrame(mapeamento).sort_values("Massa Total (t/ano)", ascending=False)
 
-            st.dataframe(
-                df_mapeamento.style.format({
-                    "Massa Total (t/ano)": lambda x: formatar_numero_br(x, 1),
-                    "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, 1),
-                    "Potencial Vermicompostagem (tCO₂e/ano)": lambda x: formatar_numero_br(x, 2)
-                }),
-                use_container_width=True,
-                height=600
-            )
+            st.dataframe(df_mapeamento.style.format({
+                "Massa Total (t/ano)": lambda x: formatar_numero_br(x, 1),
+                "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, 1),
+                "Potencial Vermicompostagem (tCO₂e/ano)": lambda x: formatar_numero_br(x, 2)
+            }), use_container_width=True, height=600)
 
             st.caption("""
-            - **Massa Total:** toda a massa declarada na coleta seletiva de orgânicos.
-            - **Massa para Aterro:** parcela destinada a aterros (MCF > 0). A maioria dos municípios já envia para compostagem/vermicompostagem, resultando em zeros.
-            - **Potencial de Vermicompostagem:** emissões evitadas se a parcela de aterro fosse desviada para vermicompostagem. Zeros são esperados onde já há tratamento adequado.
+            - Cálculo baseado em **lote único** de resíduos (massa anual declarada).
+            - Potencial de vermicompostagem: emissões evitadas se esse lote fosse desviado do aterro.
             """)
 
-else:
-    pass
-
 # =========================================================
-# Rodapé (sem alteração)
+# Rodapé
 # =========================================================
 st.markdown("---")
 st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
-Baseline do aterro com CH₄ + N₂O; tratamentos também incluem N₂O (conforme tco2eq) |
+Baseline do aterro com CH₄ + N₂O; vermicompostagem: CH₄+N₂O (perfis diários) |
 Cotações em tempo real via Yahoo Finance e APIs de câmbio. |
-⚠️ Os dados de destinação final são exibidos exatamente como declarados no SNIS, sem agregação ou filtro.
+⚠️ Dados exibidos conforme SNIS, sem deduplicação.
 """)
