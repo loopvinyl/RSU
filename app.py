@@ -338,7 +338,7 @@ def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     return mcf_base
 
 # =========================================================
-# Carga e preparação dos dados (sem filtro de duplicatas)
+# Carga e preparação dos dados
 # =========================================================
 @st.cache_data
 def load_data(ano):
@@ -349,15 +349,24 @@ def load_data(ano):
     return df
 
 df = load_data(ano_selecionado)
+
+# Definição de colunas principais
+COL_CODIGO_ROTA = df.columns[16]   # Código da rota (ex.: 3543402DEST001)
+COL_MUNICIPIO = df.columns[2]      # será renomeado
+COL_TIPO_COLETA = df.columns[17]   # será renomeado
+COL_MASSA = df.columns[24]         # será renomeado
+COL_DESTINO = df.columns[28]       # Tipo de unidade de destino
+
 df = df.rename(columns={
-    df.columns[2]: "MUNICÍPIO",
-    df.columns[17]: "TIPO_COLETA_EXECUTADA",
-    df.columns[24]: "MASSA_COLETADA"
+    COL_MUNICIPIO: "MUNICÍPIO",
+    COL_TIPO_COLETA: "TIPO_COLETA_EXECUTADA",
+    COL_MASSA: "MASSA_COLETADA"
 })
+
+# Atualiza as referências para os nomes renomeados
 COL_MUNICIPIO = "MUNICÍPIO"
 COL_TIPO_COLETA = "TIPO_COLETA_EXECUTADA"
 COL_MASSA = "MASSA_COLETADA"
-COL_DESTINO = df.columns[28]
 
 def classificar_coleta(texto):
     if pd.isna(texto):
@@ -388,31 +397,31 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (dados brutos do SNIS)
+# 🗺️ Destinação Final (exatamente igual ao Excel)
 # =========================================================
 st.markdown("---")
 st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
 
 df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna(0)
-destinacao = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index().sort_values("MASSA_FLOAT", ascending=False)
 
-def ja_eh_tratamento(destino):
-    return "compostagem" in str(destino).lower() or "vermicompostagem" in str(destino).lower()
+# Exibe todas as rotas individuais, sem agregação
+tabela_destino = df_mun[[COL_CODIGO_ROTA, COL_TIPO_COLETA, COL_DESTINO, "MASSA_FLOAT"]].copy()
+tabela_destino = tabela_destino.rename(columns={
+    COL_CODIGO_ROTA: "Código Rota",
+    COL_TIPO_COLETA: "Tipo de Coleta",
+    COL_DESTINO: "Destino",
+    "MASSA_FLOAT": "Massa (t)"
+})
+tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
 
-destinacao["Ja_Biologico"] = destinacao[COL_DESTINO].apply(ja_eh_tratamento)
-df_view = destinacao.copy()
-df_view["Massa Total (t)"] = df_view["MASSA_FLOAT"].apply(formatar_numero_br)
-df_view["Tratamento Biológico?"] = df_view["Ja_Biologico"].apply(lambda x: "✅ Sim" if x else "❌ Não")
-st.dataframe(df_view[[COL_DESTINO, "Massa Total (t)", "Tratamento Biológico?"]], use_container_width=True)
+st.dataframe(tabela_destino, use_container_width=True)
 
-massa_biologica = destinacao.loc[destinacao["Ja_Biologico"], "MASSA_FLOAT"].sum()
-st.caption(f"Total destinado a compostagem/vermicompostagem (se houver): **{formatar_numero_br(massa_biologica)} t**")
+massa_total = df_mun["MASSA_FLOAT"].sum()
+st.caption(f"Massa total coletada: **{formatar_numero_br(massa_total)} t**")
 
 st.info("""
-📌 **Nota sobre os valores exibidos:**  
-A tabela acima reflete **exatamente os dados declarados no SNIS**, somando a massa por destino.  
-Como um mesmo resíduo pode ser informado tanto na etapa de transbordo quanto no destino final (aterro), é comum que o total exibido ultrapasse a massa coletada.  
-Esses valores não estão filtrados para evitar perda de informação.
+📌 **Nota:** A tabela acima mostra os registros exatamente como declarados no SNIS, sem nenhuma agregação ou filtro.
+Os valores correspondem à massa anual coletada para cada rota e destino.
 """)
 
 # ============================================================
@@ -654,9 +663,6 @@ st.markdown("---")
 st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
 Baseline do aterro com CH₄ + N₂O; tratamentos também incluem N₂O (conforme tco2eq) |
-Cotações em tempo real via Yahoo Finance e APIs de câmbio. 
-
-⚠️ As massas exibidas na tabela "Para onde o resíduo está indo?" correspondem à soma bruta dos registros do SNIS, 
-podendo conter duplicidades quando um mesmo resíduo é informado como transbordo e destino final. 
-Nenhum filtro de deduplicação foi aplicado.
+Cotações em tempo real via Yahoo Finance e APIs de câmbio. |
+⚠️ Os dados de destinação final são exibidos exatamente como declarados no SNIS, sem agregação ou filtro.
 """)
