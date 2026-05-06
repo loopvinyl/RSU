@@ -326,7 +326,17 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (com ano e "Destino Final")
+# CHECKBOX PARA OCULTAR TRANSBORDOS
+# =========================================================
+ocultar_transbordo = st.checkbox("Ocultar transbordos", value=False)
+if ocultar_transbordo:
+    # Remove linhas cujo destino contenha "transbordo" (normalizado)
+    df_mun = df_mun[~df_mun[COL_DESTINO].apply(
+        lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+    )]
+
+# =========================================================
+# 🗺️ Destinação Final (com ano e "Tipo de Unidade (SNIS)")
 # =========================================================
 st.markdown("---")
 st.subheader(f"🗺️ Para onde o resíduo está indo? (Destinação Final, {ano_selecionado})")
@@ -336,7 +346,7 @@ df_mun["MASSA_FLOAT"] = pd.to_numeric(df_mun[COL_MASSA], errors="coerce").fillna
 massa_total = df_mun["MASSA_FLOAT"].sum()
 st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
 st.markdown("""
-A tabela abaixo exibe **cada rota de coleta** e seu respectivo destino final, exatamente como declarado no SNIS.
+A tabela abaixo exibe **cada rota de coleta** e seu respectivo tipo de unidade, exatamente como declarado no SNIS.
 Nenhuma agregação ou filtro foi aplicado – os valores correspondem à massa anual coletada para cada rota e destino.
 """)
 
@@ -344,13 +354,16 @@ tabela_destino = df_mun[[COL_CODIGO_ROTA, COL_TIPO_COLETA, COL_DESTINO, "MASSA_F
 tabela_destino = tabela_destino.rename(columns={
     COL_CODIGO_ROTA: "Código Rota",
     COL_TIPO_COLETA: "Tipo de Coleta",
-    COL_DESTINO: "Destino Final",
+    COL_DESTINO: "Tipo de Unidade (SNIS)",
     "MASSA_FLOAT": "Massa (t)"
 })
 tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
 
 st.dataframe(tabela_destino, use_container_width=True)
-st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
+st.caption("""
+📌 Os dados refletem fielmente os registros do SNIS. A coluna lista todos os tipos de unidade (intermediárias e finais). 
+Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.
+""")
 
 # =========================================================
 # 📊 Distribuição por tipo de destino (com total coletado)
@@ -365,13 +378,13 @@ if municipio == municipios[0]:
     agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
     agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
     st.dataframe(
-        agg_destino.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "Percentual (%)"]],
+        agg_destino.rename(columns={COL_DESTINO: "Tipo de Unidade (SNIS)"})[["Tipo de Unidade (SNIS)", "Massa (t)", "Percentual (%)"]],
         use_container_width=True
     )
-    st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final).")
+    st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (ex.: transbordo e destino final).")
 
 # ============================================================
-# ♻️ ORGÂNICOS (com "Destino Final")
+# ♻️ ORGÂNICOS (com "Tipo de Unidade (SNIS)")
 # ============================================================
 st.markdown("---")
 st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
@@ -395,7 +408,7 @@ if not df_organicos.empty:
     df_org_dest_view["Massa (t)"] = df_org_dest_view["MASSA_FLOAT"].apply(formatar_numero_br)
     df_org_dest_view["%"] = df_org_dest_view["%"].apply(lambda x: formatar_numero_br(x, 1))
     st.dataframe(
-        df_org_dest_view.rename(columns={COL_DESTINO: "Destino Final"})[["Destino Final", "Massa (t)", "%"]],
+        df_org_dest_view.rename(columns={COL_DESTINO: "Tipo de Unidade (SNIS)"})[["Tipo de Unidade (SNIS)", "Massa (t)", "%"]],
         use_container_width=True
     )
 
@@ -411,7 +424,7 @@ if not df_organicos.empty:
             co2eq_aterro_total += co2eq_aterro
             massa_aterro_total += massa_t
             resultados.append({
-                "Destino Final": row[COL_DESTINO],
+                "Tipo de Unidade (SNIS)": row[COL_DESTINO],
                 "Massa (t)": formatar_numero_br(massa_t),
                 "MCF": formatar_numero_br(mcf, 2),
                 "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro, 1)
@@ -440,7 +453,7 @@ else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🏆 RANKING MUNICIPAL (com "Destino Final")
+# 🏆 RANKING MUNICIPAL (com "Tipo de Unidade (SNIS)")
 # ============================================================
 if municipio == municipios[0]:
     st.markdown("---")
@@ -483,7 +496,7 @@ if municipio == municipios[0]:
                     "UF": uf,
                     "Massa Total (t/ano)": massa_total,
                     "Massa para Aterro (t/ano)": massa_aterro,
-                    "Destino(s) Final(is)": destinos,
+                    "Tipo(s) de Unidade (SNIS)": destinos,
                     "Receita Potencial (R$/ano)": receita_anual
                 })
 
@@ -508,5 +521,5 @@ st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
 Baseline do aterro com CH₄ + N₂O; vermicompostagem: CH₄+N₂O (perfis diários) |
 Cotações em tempo real via Yahoo Finance e APIs de câmbio. |
-⚠️ Dados exibidos conforme SNIS, sem deduplicação.
+⚠️ Dados exibidos conforme SNIS, sem deduplicação. Transbordos podem ser ocultados com o checkbox.
 """)
