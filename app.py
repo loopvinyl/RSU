@@ -397,7 +397,7 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (com resumo antes da tabela)
+# 🗺️ Destinação Final (com resumo)
 # =========================================================
 st.markdown("---")
 st.subheader("🗺️ Para onde o resíduo está indo? (Destinação Final)")
@@ -427,7 +427,7 @@ st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
 # ============================================================
-# ♻️ ORGÂNICOS (demais seções mantidas)
+# ♻️ ORGÂNICOS (com resumo)
 # ============================================================
 st.markdown("---")
 st.subheader("♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos")
@@ -437,7 +437,13 @@ df_organicos = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains(
 if not df_organicos.empty:
     df_organicos["MASSA_FLOAT"] = pd.to_numeric(df_organicos[COL_MASSA], errors="coerce").fillna(0)
     total_organicos = df_organicos["MASSA_FLOAT"].sum()
-    st.metric("Massa total de orgânicos coletados seletivamente", f"{formatar_numero_br(total_organicos)} t")
+
+    # Resumo antes da tabela
+    st.markdown(f"### Total de orgânicos coletados seletivamente: **{formatar_numero_br(total_organicos)} t**")
+    st.markdown("""
+    Abaixo, a destinação informada para cada rota de coleta seletiva de orgânicos, conforme o SNIS.
+    Os percentuais indicam a distribuição da massa total.
+    """)
 
     df_org_dest = df_organicos.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
     df_org_dest["%"] = df_org_dest["MASSA_FLOAT"] / total_organicos * 100
@@ -563,7 +569,7 @@ else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🌳 PODAS E GALHADAS
+# 🌳 PODAS E GALHADAS (com resumo)
 # ============================================================
 st.markdown("---")
 st.subheader("🌳 Destinação das podas e galhadas de áreas verdes públicas")
@@ -572,7 +578,13 @@ df_podas = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains("áreas verde
 if not df_podas.empty:
     df_podas["MASSA_FLOAT"] = pd.to_numeric(df_podas[COL_MASSA], errors="coerce").fillna(0)
     total_podas = df_podas["MASSA_FLOAT"].sum()
-    st.metric("Massa total de podas e galhadas", f"{formatar_numero_br(total_podas)} t")
+
+    # Resumo antes da tabela
+    st.markdown(f"### Total de podas e galhadas: **{formatar_numero_br(total_podas)} t**")
+    st.markdown("""
+    Destinação informada para cada rota de coleta de podas e galhadas, conforme o SNIS.
+    Os percentuais indicam a distribuição da massa total.
+    """)
 
     df_pod_dest = df_podas.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
     df_pod_dest["%"] = df_pod_dest["MASSA_FLOAT"] / total_podas * 100
