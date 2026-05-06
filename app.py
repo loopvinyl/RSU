@@ -424,12 +424,6 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
-with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
-    st.markdown("""
-    ### 🔍 Classificação dos destinos e Fator de Correção de Metano (MCF)
-    ...
-    """)
-
 # NOVA SEÇÃO: Agregação por tipo de destino (somente para Brasil)
 if municipio == municipios[0]:
     st.markdown("---")
@@ -496,7 +490,6 @@ if not df_organicos.empty:
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
         massa_kg_dia = (massa_aterro_total * 1000) / 365
-        # Apenas vermicompostagem, conforme solicitado
         ch4_vermi, n2o_vermi = calcular_emissoes_vermicompostagem_diarias(massa_kg_dia)
         co2eq_vermi = (ch4_vermi.sum() * GWP_CH4_20 + n2o_vermi.sum() * GWP_N2O_20) / 1000
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
@@ -527,23 +520,6 @@ if not df_organicos.empty:
         st.success("✅ Nenhum orgânico destinado a aterro.")
 else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
-
-# ============================================================
-# 🌳 PODAS E GALHADAS (mantido)
-# ============================================================
-st.markdown("---")
-st.subheader("🌳 Destinação das podas e galhadas de áreas verdes públicas")
-# ... (código existente, sem alterações)
-
-# ============================================================
-# 💡 Inovação sugerida (mantida)
-# ============================================================
-with st.expander("💡 Inovação sugerida"):
-    st.markdown("""
-    **Próximo passo:** classificar os municípios por **potencial total de emissões evitadas**
-    e gerar um **ranking municipal dinâmico**, identificando onde um projeto de vermicompostagem
-    teria maior impacto ambiental e financeiro.
-    """)
 
 # ============================================================
 # 🏆 RANKING MUNICIPAL DE POTENCIAL DA VERMICOMPOSTAGEM
@@ -611,8 +587,8 @@ if municipio == municipios[0]:
 
             st.caption("""
             - **Massa Total:** toda a massa declarada na coleta seletiva de orgânicos.
-            - **Massa para Aterro:** parcela destinada a aterros (MCF > 0). A maioria dos municípios já envia para compostagem/vermicompostagem, resultando em valores zerados.
-            - **Potencial de Vermicompostagem:** emissões evitadas se a parcela de aterro fosse desviada para vermicompostagem.
+            - **Massa para Aterro:** parcela destinada a aterros (MCF > 0). A maioria dos municípios já envia para compostagem/vermicompostagem, resultando em zeros.
+            - **Potencial de Vermicompostagem:** emissões evitadas se a parcela de aterro fosse desviada para vermicompostagem. Zeros são esperados onde já há tratamento adequado.
             """)
 
 else:
