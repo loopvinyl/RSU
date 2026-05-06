@@ -430,14 +430,14 @@ else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
 # ============================================================
-# 🏆 RANKING MUNICIPAL
+# 🏆 RANKING MUNICIPAL – COM RECEITA (R$/ano)
 # ============================================================
 if municipio == municipios[0]:
     st.markdown("---")
     st.header("🏆 Mapeamento de Coleta Seletiva de Orgânicos")
     st.markdown("""
     Lista de todos os municípios que declararam possuir **coleta seletiva de resíduos orgânicos**,
-    com a massa e o potencial de vermicompostagem (lote único).
+    com a massa coletada e a **receita potencial anual com créditos de carbono** (vermicompostagem).
     """)
 
     with st.spinner("Consultando dados..."):
@@ -452,6 +452,8 @@ if municipio == municipios[0]:
             ranking_data = df_org_ranking.groupby([COL_MUNICIPIO, COL_UF, COL_DESTINO])["MASSA_FLOAT_RANK"].sum().reset_index()
 
             mapeamento = []
+            preco = st.session_state.preco_carbono
+            cambio = st.session_state.taxa_cambio
             for (mun, uf), grupo in ranking_data.groupby([COL_MUNICIPIO, COL_UF]):
                 massa_total = grupo["MASSA_FLOAT_RANK"].sum()
                 destinos = ", ".join(sorted(grupo[COL_DESTINO].unique()))
@@ -459,11 +461,12 @@ if municipio == municipios[0]:
                 grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
                 massa_aterro = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
                 
-                evitado_20anos = 0.0
+                receita_anual = 0.0
                 if massa_aterro > 0:
                     co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_aterro, 0.8)
                     co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
+                    receita_anual = (evitado_20anos / ANOS_PROJECAO) * preco * cambio
 
                 mapeamento.append({
                     "Município": mun,
@@ -471,7 +474,7 @@ if municipio == municipios[0]:
                     "Massa Total (t/ano)": massa_total,
                     "Massa para Aterro (t/ano)": massa_aterro,
                     "Destino(s)": destinos,
-                    "Potencial Vermicompostagem (tCO₂e/ano)": evitado_20anos / ANOS_PROJECAO
+                    "Receita Potencial (R$/ano)": receita_anual
                 })
 
             df_mapeamento = pd.DataFrame(mapeamento).sort_values("Massa Total (t/ano)", ascending=False)
@@ -479,12 +482,12 @@ if municipio == municipios[0]:
             st.dataframe(df_mapeamento.style.format({
                 "Massa Total (t/ano)": lambda x: formatar_numero_br(x, 1),
                 "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, 1),
-                "Potencial Vermicompostagem (tCO₂e/ano)": lambda x: formatar_numero_br(x, 2)
+                "Receita Potencial (R$/ano)": lambda x: f"R$ {formatar_numero_br(x, 2)}"
             }), use_container_width=True, height=600)
 
             st.caption("""
             - Cálculo baseado em **lote único** de resíduos (massa anual declarada).
-            - Potencial de vermicompostagem: emissões evitadas se esse lote fosse desviado do aterro.
+            - Receita potencial anual considerando o preço atual do carbono (cenário otimista GWP-20).
             """)
 
 # =========================================================
