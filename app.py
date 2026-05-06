@@ -426,6 +426,30 @@ st.dataframe(tabela_destino, use_container_width=True)
 
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
+# NOVO: explicação sobre os tipos de destino e MCF
+with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
+    st.markdown("""
+    ### 🔍 Classificação dos destinos e Fator de Correção de Metano (MCF)
+
+    Os destinos declarados no SNIS podem ser agrupados conforme a geração de metano (CH₄).
+    O fator MCF (IPCC 2006) ajusta a quantidade de CH₄ produzida, refletindo o tipo de manejo e a presença de condições anaeróbicas.
+
+    | Destino                              | MCF adotado | Descrição                                                                                     |
+    |--------------------------------------|-------------|-----------------------------------------------------------------------------------------------|
+    | **Aterro Sanitário**                 | 0,8 (padrão) ou 1,0 (com coleta de biogás) | Disposição em células impermeabilizadas com controle ambiental; baixa geração de CH₄ se gerenciado. |
+    | **Aterro Controlado**                | 0,4         | Disposição intermediária entre lixão e aterro sanitário; algum controle, mas sem coleta de gás. |
+    | **Lixão / Vazadouro**                | 0,4         | Disposição a céu aberto; alta geração de CH₄; usado o mesmo MCF de aterro controlado (cenário conservador). |
+    | **Aterro de Inertes**                | 0,0         | Resíduos inertes não geram metano.                                                           |
+    | Unidade de Transbordo                | 0,0         | Apenas transferência de resíduos; não é disposição final.                                     |
+    | Unidade de Triagem / Reciclagem      | 0,0         | Separação de materiais; não há decomposição significativa.                                    |
+    | Unidade de Compostagem / Vermicompostagem | 0,0     | Tratamento biológico aeróbio; emissões computadas no cálculo do projeto.                      |
+    | Outros (coprocessamento, ATT, etc.)  | 0,0         | Não se aplica ao cálculo de linha de base de aterro.                                          |
+
+    **Nota para podas e galhadas:** o MCF de aterro é reduzido à metade (ex.: aterro sanitário 0,4 em vez de 0,8) devido à natureza lenhosa e menor geração de metano.
+
+    Os valores de MCF são baseados nas diretrizes do IPCC (2006) e adaptados à realidade brasileira.
+    """)
+
 # ============================================================
 # ♻️ ORGÂNICOS (com resumo)
 # ============================================================
