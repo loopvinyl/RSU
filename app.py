@@ -18,7 +18,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🌱 Potencial de Vermicompostagem por Município")
+st.title("🌱 Potencial de Compostagem e Vermicompostagem por Município")
 st.markdown("""
 Este aplicativo interpreta os **tipos de coleta executada** informados pelos municípios
 e avalia o **potencial técnico para compostagem e vermicompostagem**
@@ -424,32 +424,23 @@ tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_
 st.dataframe(tabela_destino, use_container_width=True)
 st.caption("📌 Os dados refletem fielmente os registros do SNIS. Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.")
 
-with st.expander("ℹ️ Sobre os destinos e seus fatores de emissão (MCF)"):
+# NOVA SEÇÃO: Agregação por tipo de destino (somente para Brasil)
+if municipio == municipios[0]:
+    st.markdown("---")
+    st.subheader("📊 Distribuição dos resíduos por tipo de destino")
     st.markdown("""
-    ### 🔍 Classificação dos destinos e Fator de Correção de Metano (MCF)
-
-    Os destinos declarados no SNIS podem ser agrupados conforme a geração de metano (CH₄).
-    O fator MCF (IPCC 2006) ajusta a quantidade de CH₄ produzida, refletindo o tipo de manejo e a presença de condições anaeróbicas.
-
-    | Destino                              | MCF adotado | Descrição                                                                                     |
-    |--------------------------------------|-------------|-----------------------------------------------------------------------------------------------|
-    | **Aterro Sanitário**                 | 0,8 (padrão) ou 1,0 (com coleta de biogás) | Disposição em células impermeabilizadas com controle ambiental; baixa geração de CH₄ se gerenciado. |
-    | **Aterro Controlado**                | 0,4         | Disposição intermediária entre lixão e aterro sanitário; algum controle, mas sem coleta de gás. |
-    | **Lixão / Vazadouro**                | 0,4         | Disposição a céu aberto; alta geração de CH₄; usado o mesmo MCF de aterro controlado (cenário conservador). |
-    | **Aterro de Inertes**                | 0,0         | Resíduos inertes não geram metano.                                                           |
-    | Unidade de Transbordo                | 0,0         | Apenas transferência de resíduos; não é disposição final.                                     |
-    | Unidade de Triagem / Reciclagem      | 0,0         | Separação de materiais; não há decomposição significativa.                                    |
-    | Unidade de Compostagem / Vermicompostagem | 0,0     | Tratamento biológico aeróbio; emissões computadas no cálculo do projeto.                      |
-    | Outros (coprocessamento, ATT, etc.)  | 0,0         | Não se aplica ao cálculo de linha de base de aterro.                                          |
-
-    **Nota para podas e galhadas:** o MCF de aterro é reduzido à metade (ex.: aterro sanitário 0,4 em vez de 0,8) devido à natureza lenhosa e menor geração de metano.
-
-    **Referências (baseline do aterro):**  
-    - Metano: IPCC (2006), UNFCCC (2016) e Wang et al. (2023)  
-    - Óxido Nitroso: Wang et al. (2017)  
-    - Metano e Óxido Nitroso no pré‑descarte: Feng et al. (2020)  
-    - Fator φ = 0,85 (UNFCCC, 2024) aplicado ao baseline para clima úmido
+    Abaixo, a soma das massas **agrupadas por tipo de destino**, ordenadas da maior para a menor,
+    com o respectivo percentual do total coletado. Essa visão permite identificar rapidamente quais são os principais destinos dos resíduos sólidos urbanos no país.
     """)
+    # Agregação
+    agg_destino = df_mun.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
+    agg_destino = agg_destino.sort_values("MASSA_FLOAT", ascending=False)
+    agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total) * 100
+    # Formatação
+    agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
+    agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
+    st.dataframe(agg_destino[[COL_DESTINO, "Massa (t)", "Percentual (%)"]], use_container_width=True)
+    st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (transbordo e destino final), conforme explicado anteriormente.")
 
 # ============================================================
 # ♻️ ORGÂNICOS (com resumo) – código mantido
