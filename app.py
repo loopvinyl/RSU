@@ -326,7 +326,7 @@ df_mun = df_clean.copy() if municipio == municipios[0] else df_clean[df_clean[CO
 st.subheader(f"🇧🇷 Brasil — Síntese Nacional de RSU ({ano_selecionado})" if municipio == municipios[0] else f"📍 {municipio} - Ano {ano_selecionado}")
 
 # =========================================================
-# 🗺️ Destinação Final (com checkbox interno)
+# 🗺️ Destinação Final (com checkbox e coluna %)
 # =========================================================
 st.markdown("---")
 st.subheader(f"🗺️ Para onde o resíduo está indo? (Destinação Final, {ano_selecionado})")
@@ -354,9 +354,15 @@ tabela_destino = tabela_destino.rename(columns={
     COL_DESTINO: "Tipo de Unidade (SNIS)",
     "MASSA_FLOAT": "Massa (t)"
 })
-tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
 
-st.dataframe(tabela_destino, use_container_width=True)
+# Calcula percentual em relação ao total exibido (massa_total)
+tabela_destino["%"] = (tabela_destino["Massa (t)"] / massa_total) * 100 if massa_total > 0 else 0
+
+# Formata as colunas
+tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
+tabela_destino["%"] = tabela_destino["%"].apply(lambda x: formatar_numero_br(x, 1))
+
+st.dataframe(tabela_destino[["Código Rota", "Tipo de Coleta", "Tipo de Unidade (SNIS)", "Massa (t)", "%"]], use_container_width=True)
 st.caption("""
 📌 Os dados refletem fielmente os registros do SNIS. A coluna lista todos os tipos de unidade (intermediárias e finais). 
 Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.
@@ -370,7 +376,6 @@ if municipio == municipios[0]:
     st.subheader(f"📊 Distribuição dos resíduos por tipo de destino ({ano_selecionado})")
     st.markdown(f"### Total de resíduos coletados: **{formatar_numero_br(massa_total)} t**")
 
-    # Checkbox também aqui, para controle local (mesma variável)
     ocultar_transbordo_dist = st.checkbox("Ocultar transbordos", value=ocultar_transbordo, key="ocultar_transbordo_dist")
 
     if ocultar_transbordo_dist:
