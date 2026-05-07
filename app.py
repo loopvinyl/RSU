@@ -661,6 +661,68 @@ if not df_organicos.empty:
 else:
     st.info("ℹ️ Sem registros de coleta seletiva de orgânicos.")
 
+# ============================================================
+# 🌳 DESTINO DA COLETA DE PODAS E GALHADAS (nova seção)
+# ============================================================
+st.markdown("---")
+st.subheader(f"🌳 Destinação da coleta de podas e galhadas ({ano_selecionado})")
+df_podas = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains("áreas verdes públicas", case=False, na=False)].copy()
+
+if not df_podas.empty:
+    df_podas["MASSA_FLOAT"] = pd.to_numeric(df_podas[COL_MASSA], errors="coerce").fillna(0)
+
+    ocultar_transbordo_podas = st.checkbox("Ocultar transbordos", value=False, key="ocultar_transbordo_podas")
+
+    df_mun_podas = df_mun.copy()
+    if ocultar_transbordo_podas:
+        df_podas = df_podas[~df_podas[COL_DESTINO].apply(
+            lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+        )]
+        df_mun_podas = df_mun_podas[~df_mun_podas[COL_DESTINO].apply(
+            lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+        )]
+
+    total_podas = df_podas["MASSA_FLOAT"].sum()
+    massa_total_geral_podas = df_mun_podas["MASSA_FLOAT"].sum()
+
+    st.markdown(f"### Total de podas e galhadas coletadas: **{formatar_numero_br(total_podas)} t**")
+
+    st.markdown("#### Tabela – Destino da coleta de podas e galhadas")
+    agg_podas = df_podas.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
+    agg_podas = agg_podas.sort_values("MASSA_FLOAT", ascending=False)
+    agg_podas["% do tipo"] = (agg_podas["MASSA_FLOAT"] / total_podas) * 100 if total_podas > 0 else 0
+    agg_podas["% do total no ano"] = (agg_podas["MASSA_FLOAT"] / massa_total_geral_podas) * 100 if massa_total_geral_podas > 0 else 0
+
+    linhas_podas = []
+    for _, row in agg_podas.iterrows():
+        linhas_podas.append({
+            "Destino": row[COL_DESTINO],
+            "Massa Anual (t)": formatar_numero_br(row["MASSA_FLOAT"], 2),
+            "% do tipo": formatar_numero_br(row["% do tipo"], 2),
+            "% do total no ano": formatar_numero_br(row["% do total no ano"], 4)
+        })
+
+    perc_total_tipo_podas = (total_podas / massa_total_geral_podas) * 100 if massa_total_geral_podas > 0 else 0
+    linhas_podas.append({
+        "Destino": "Total do tipo",
+        "Massa Anual (t)": formatar_numero_br(total_podas, 2),
+        "% do tipo": "100,00%",
+        "% do total no ano": formatar_numero_br(perc_total_tipo_podas, 4)
+    })
+
+    linhas_podas.append({
+        "Destino": "Total no ano",
+        "Massa Anual (t)": formatar_numero_br(massa_total_geral_podas, 2),
+        "% do tipo": " - ",
+        "% do total no ano": "100,00%"
+    })
+
+    df_resumo_podas = pd.DataFrame(linhas_podas)
+    st.dataframe(df_resumo_podas, use_container_width=True)
+
+else:
+    st.info("ℹ️ Sem registros de coleta de podas e galhadas.")
+
 # =========================================================
 # Rodapé
 # =========================================================
