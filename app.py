@@ -427,7 +427,7 @@ if municipio == municipios[0]:
     )
 
 # ============================================================
-# ♻️ ORGÂNICOS (com atualização de cotações e nota de precisão)
+# ♻️ ORGÂNICOS (com nova tabela resumo e checkbox)
 # ============================================================
 st.markdown("---")
 st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
@@ -436,16 +436,61 @@ df_organicos = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains(
 
 if not df_organicos.empty:
     df_organicos["MASSA_FLOAT"] = pd.to_numeric(df_organicos[COL_MASSA], errors="coerce").fillna(0)
+
+    # Checkbox local para ocultar transbordos na tabela de orgânicos
+    ocultar_transbordo_org = st.checkbox("Ocultar transbordos", value=False, key="ocultar_transbordo_org")
+    if ocultar_transbordo_org:
+        df_organicos = df_organicos[~df_organicos[COL_DESTINO].apply(
+            lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+        )]
+
     total_organicos = df_organicos["MASSA_FLOAT"].sum()
+    massa_total_geral = df_mun["MASSA_FLOAT"].sum()
 
     st.markdown(f"### Total de orgânicos coletados seletivamente: **{formatar_numero_br(total_organicos)} t**")
-    st.markdown("""
-    Abaixo, a destinação informada para cada rota de coleta seletiva de orgânicos, conforme o SNIS.
-    Os percentuais indicam a distribuição da massa total.
-    """)
 
+    # --- NOVA TABELA RESUMO ---
+    st.markdown("#### Tabela – Destino da coleta de recicláveis orgânicos")
+    # Agrupar por destino
+    agg_org = df_organicos.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
+    agg_org = agg_org.sort_values("MASSA_FLOAT", ascending=False)
+    agg_org["% do tipo"] = (agg_org["MASSA_FLOAT"] / total_organicos) * 100 if total_organicos > 0 else 0
+    agg_org["% do total no ano"] = (agg_org["MASSA_FLOAT"] / massa_total_geral) * 100 if massa_total_geral > 0 else 0
+
+    # Preparar linhas de dados
+    linhas = []
+    for _, row in agg_org.iterrows():
+        linhas.append({
+            "Destino": row[COL_DESTINO],
+            "Massa Anual (t)": formatar_numero_br(row["MASSA_FLOAT"], 2),
+            "% do tipo": formatar_numero_br(row["% do tipo"], 2),
+            "% do total no ano": formatar_numero_br(row["% do total no ano"], 4)
+        })
+
+    # Linha de total do tipo
+    perc_total_tipo = (total_organicos / massa_total_geral) * 100 if massa_total_geral > 0 else 0
+    linhas.append({
+        "Destino": "Total do tipo",
+        "Massa Anual (t)": formatar_numero_br(total_organicos, 2),
+        "% do tipo": "100,00%",
+        "% do total no ano": formatar_numero_br(perc_total_tipo, 4)
+    })
+
+    # Linha de total no ano
+    linhas.append({
+        "Destino": "Total no ano",
+        "Massa Anual (t)": formatar_numero_br(massa_total_geral, 2),
+        "% do tipo": " - ",
+        "% do total no ano": "100,00%"
+    })
+
+    df_resumo = pd.DataFrame(linhas)
+    st.dataframe(df_resumo, use_container_width=True)
+
+    # --- TABELA DETALHADA (já existente) ---
+    st.markdown("#### Detalhamento por destino")
     df_org_dest = df_organicos.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().reset_index()
-    df_org_dest["%"] = df_org_dest["MASSA_FLOAT"] / total_organicos * 100
+    df_org_dest["%"] = (df_org_dest["MASSA_FLOAT"] / total_organicos) * 100 if total_organicos > 0 else 0
     df_org_dest = df_org_dest.sort_values("%", ascending=False)
     df_org_dest_view = df_org_dest.copy()
     df_org_dest_view["Massa (t)"] = df_org_dest_view["MASSA_FLOAT"].apply(formatar_numero_br)
