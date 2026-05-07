@@ -427,7 +427,7 @@ if municipio == municipios[0]:
     )
 
 # ============================================================
-# 🏆 RANKING MUNICIPAL (agora antes dos orgânicos, com métricas adicionais)
+# 🏆 RANKING MUNICIPAL (antes dos orgânicos, com métricas adicionais)
 # ============================================================
 if municipio == municipios[0]:
     st.markdown("---")
@@ -506,7 +506,7 @@ if municipio == municipios[0]:
             """)
 
 # ============================================================
-# ♻️ ORGÂNICOS (após o mapeamento, com nova tabela resumo e checkbox)
+# ♻️ ORGÂNICOS (após o mapeamento, com nova tabela resumo e checkbox que afeta o total geral)
 # ============================================================
 st.markdown("---")
 st.subheader(f"♻️ Destinação da Coleta Seletiva de Resíduos Orgânicos ({ano_selecionado})")
@@ -516,14 +516,21 @@ df_organicos = df_mun[df_mun[COL_TIPO_COLETA].astype(str).str.contains(
 if not df_organicos.empty:
     df_organicos["MASSA_FLOAT"] = pd.to_numeric(df_organicos[COL_MASSA], errors="coerce").fillna(0)
 
+    # Checkbox local
     ocultar_transbordo_org = st.checkbox("Ocultar transbordos", value=False, key="ocultar_transbordo_org")
+
+    # Cópia de df_mun para calcular o total geral impactado pelo checkbox
+    df_mun_org = df_mun.copy()
     if ocultar_transbordo_org:
         df_organicos = df_organicos[~df_organicos[COL_DESTINO].apply(
             lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
         )]
+        df_mun_org = df_mun_org[~df_mun_org[COL_DESTINO].apply(
+            lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+        )]
 
     total_organicos = df_organicos["MASSA_FLOAT"].sum()
-    massa_total_geral = df_mun["MASSA_FLOAT"].sum()
+    massa_total_geral = df_mun_org["MASSA_FLOAT"].sum()  # total geral já filtrado
 
     st.markdown(f"### Total de orgânicos coletados seletivamente: **{formatar_numero_br(total_organicos)} t**")
 
