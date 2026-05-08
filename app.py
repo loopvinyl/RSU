@@ -84,14 +84,46 @@ if 'taxa_cambio' not in st.session_state:
     st.session_state.taxa_cambio = cambio
     st.session_state.moeda_real = moeda_r
 
-# Formatações
-def formatar_br(numero):
+# =========================================================
+# FORMATAÇÕES – AJUSTE AUTOMÁTICO DE CASAS DECIMAIS
+# =========================================================
+def formatar_br(numero, auto_precision=True, casas_override=None):
+    """
+    Formata número no padrão brasileiro.
+    Se casas_override é fornecido, usa aquele número de casas.
+    Caso contrário, se auto_precision=True:
+        - >= 1 → 2 casas decimais
+        - < 1 → 4 casas decimais
+    """
     if pd.isna(numero) or numero is None:
         return "N/A"
-    numero = round(numero, 2)
-    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    try:
+        numero = float(numero)
+        if casas_override is not None:
+            decimais = casas_override
+        elif auto_precision:
+            decimais = 2 if abs(numero) >= 1 else 4
+        else:
+            decimais = 2
+        numero_arredondado = round(numero, decimais)
+        if decimais == 0:
+            return f"{numero_arredondado:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        else:
+            formato = f"{{:,.{decimais}f}}"
+            return formato.format(numero_arredondado).replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return "N/A"
+
+def formatar_numero_br(valor, decimais=None, auto_precision=True):
+    """
+    Versão de compatibilidade – se 'decimais' for None, usa a lógica automática.
+    """
+    if decimais is not None:
+        return formatar_br(valor, auto_precision=False, casas_override=decimais)
+    return formatar_br(valor, auto_precision=auto_precision, casas_override=None)
 
 def br_format(x, pos):
+    """Formatador para eixos de gráficos (mantido original)."""
     if x == 0:
         return "0"
     if abs(x) < 0.01:
@@ -100,22 +132,10 @@ def br_format(x, pos):
         return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def formatar_numero_br(valor, decimais=2):
-    if pd.isna(valor) or valor is None:
-        return "Não informado"
-    try:
-        num = float(valor)
-        formato = f"{{:,.{decimais}f}}".format(num)
-        partes = formato.split(".")
-        milhar = partes[0].replace(",", "X").replace(".", ",").replace("X", ".")
-        return f"{milhar},{partes[1]}"
-    except:
-        return "Não informado"
-
 def formatar_massa_br(valor):
     if pd.isna(valor) or valor is None:
         return "Não informado"
-    return f"{formatar_numero_br(valor)} t"
+    return f"{formatar_br(valor)} t"
 
 def normalizar_texto(txt):
     if pd.isna(txt):
