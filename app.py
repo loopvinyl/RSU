@@ -135,34 +135,32 @@ def classificar_tipo_aterro(mcf):
         return "Não Aterro"
 
 # =========================================================
-# PARÂMETROS GERAIS (alinhados com app.py)
+# PARÂMETROS GERAIS (tco2eq)
 # =========================================================
 GWP_CH4_20 = 79.7
 GWP_N2O_20 = 273.0
 ANOS_PROJECAO = 20
 DIAS_PROJECAO = ANOS_PROJECAO * 365
-UMIDADE_PADRAO = 0.85          # fração de umidade do resíduo
-PHI_BASELINE = 0.85            # fator φ para clima úmido (UNFCCC 2024)
+UMIDADE_PADRAO = 0.85
+PHI_BASELINE = 0.85
 CAPTURA_CH4 = 0.0
 
-# Pré‑descarte (valores idênticos ao app.py)
-# CH4: 2,78 μg C kg⁻¹ h⁻¹ -> kg CH4 kg⁻¹ dia⁻¹
-CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000_000
-# N2O: total de 20,26 mg N kg⁻¹ (Feng et al. 2020)
-N2O_PRE_TOTAL_KG_POR_KG = 20.26 * (44/28) / 1_000_000
+# Pré‑descarte
+CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000
+N2O_PRE_KG_POR_KG_DIA = (20.26 / 3) * (44/28) / 1_000_000
 PROFILE_N2O_PRE = {1: 0.8623, 2: 0.10, 3: 0.0377}
 PROFILE_N2O_LANDFILL = {1: 0.10, 2: 0.30, 3: 0.40, 4: 0.15, 5: 0.05}
 
-# Parâmetros da fração orgânica (baseado em Yang et al. 2017)
-TOC_ORGANICO = 0.436
-TN_ORGANICO = 0.0142           # 14,2 g/kg = 0,0142
-CH4_C_FRAC_YANG_ORGANICO = 0.0013   # f_CH4_vermi
-CH4_C_FRAC_THERMO_ORGANICO = 0.0060 # f_CH4_thermo
-N2O_N_FRAC_YANG_ORGANICO = 0.0092   # f_N2O_vermi
-N2O_N_FRAC_THERMO_ORGANICO = 0.0196 # f_N2O_thermo
+# Parâmetros por tipo
+T_ORGANICO, DOC_ORGANICO, k_ano_ORGANICO = 25.0, 0.15, 0.06
+TOC_ORGANICO, TN_ORGANICO = 0.436, 14.2 / 1000
+CH4_C_FRAC_YANG_ORGANICO = 0.13 / 100
+CH4_C_FRAC_THERMO_ORGANICO = 0.006
+N2O_N_FRAC_YANG_ORGANICO = 0.92 / 100
+N2O_N_FRAC_THERMO_ORGANICO = 0.0196
 DIAS_COMPOSTAGEM_ORGANICO = 50
 
-# Perfis diários de emissão (idênticos ao app.py)
+# Perfis (já normalizados)
 def carregar_perfis():
     p_ch4_vermi_org = np.array([
         0.02, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06,
@@ -187,95 +185,126 @@ def carregar_perfis():
 (p_ch4_vermi_org, p_n2o_vermi_org) = carregar_perfis()
 
 # =========================================================
-# FUNÇÕES DE CÁLCULO (alinhadas com GHGEmissionCalculator do app.py)
+# FUNÇÕES DE CÁLCULO – FLUXO DIÁRIO DURANTE 1 ANO
 # =========================================================
-def calcular_emissoes_aterro_lote_unico(massa_total_kg, mcf, k_ano, temp_C, doc, dias=DIAS_PROJECAO):
+def construir_lotes_diarios(massa_total_ano_kg, dias_entrada=365, dias_projecao=DIAS_PROJECAO):
     """
-    Lote único de massa_total_kg (úmida). Calcula emissões diárias de CH4 e N2O.
+    Cria vetor de entrada: massa_diaria durante o primeiro ano, zero no restante.
     """
-    # Potencial de metano (IPCC)
+    entrada = np.zeros(dias_projecao, dtype=float)
+    if dias_entrada > 0:
+        massa_diaria = massa_total_ano_kg / dias_entrada
+        entrada[:dias_entrada] = massa_diaria
+    return entrada
+
+def calcular_emissoes_aterro_diario(massa_total_ano_kg, mcf, k_ano, temp_C, doc,
+                                    dias_projecao=DIAS_PROJECAO, dias_entrada=365):
+    """
+    Emissões do aterro com lotes diários constantes por 1 ano.
+    Retorna: (ch4_diario, n2o_diario, co2eq_diario) arrays de tamanho dias_projecao.
+    """
+    if massa_total_ano_kg <= 0 or mcf <= 0:
+        return np.zeros(dias_projecao), np.zeros(dias_projecao), np.zeros(dias_projecao)
+
+    # Potencial de metano
     docf = 0.0147 * temp_C + 0.28
-    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)   # F=0.5, OX=0.1, Ri=0
+    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)  # (1-Ri)*(1-OX) = (1-0)*(1-0.1) = 0.9
+    ch4_pot_por_kg *= PHI_BASELINE * (1 - CAPTURA_CH4)
 
-    t = np.arange(1, dias + 1, dtype=float)
+    # Kernel exponencial
+    t = np.arange(1, dias_projecao + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
-    ch4_diario = massa_total_kg * ch4_pot_por_kg * kernel_ch4
-    ch4_diario *= PHI_BASELINE * (1 - CAPTURA_CH4)
+    kernel_ch4 = np.maximum(kernel_ch4, 0)
 
-    # Emissões de N2O no aterro (Wang et al. 2017)
-    # opening factor baseado na massa diária média (massa_total_kg / 365)
-    massa_dia_media = massa_total_kg / 365 if massa_total_kg > 0 else 0
-    opening = np.clip((100.0 / massa_dia_media) * (8.0 / 24), 0.0, 1.0) if massa_dia_media > 0 else 0.0
-    E_avg = opening * 1.91 + (1 - opening) * 2.15
-    E_avg *= (1 - UMIDADE_PADRAO) / (1 - 0.55)
-    fator_n2o_por_kg = (E_avg * (44/28) / 1_000_000)
+    # Entrada (1 ou 365) – aqui usamos 365
+    entrada = construir_lotes_diarios(massa_total_ano_kg, dias_entrada, dias_projecao)
+    ch4_diario = np.convolve(entrada, kernel_ch4, mode='full')[:dias_projecao] * ch4_pot_por_kg
 
-    n2o_diario = np.zeros(dias)
+    # Pré-descarte CH4 (constante diária de 2,78 ugC/kg/h → kg/kg/dia)
+    ch4_pre_diario = entrada * CH4_PRE_KG_POR_KG_DIA
+
+    # N2O do aterro (Wang et al.)
+    # Fator de abertura
+    massa_media_diaria = massa_total_ano_kg / 365 if massa_total_ano_kg > 0 else 0
+    f_aberto = np.clip((100.0 / massa_media_diaria) * (8.0 / 24), 0.0, 1.0) if massa_media_diaria > 0 else 0.0
+    E_medio = f_aberto * 1.91 + (1 - f_aberto) * 2.15
+    E_medio_ajust = E_medio * ((1 - UMIDADE_PADRAO) / (1 - 0.55))
+    fator_n2o_por_kg = (E_medio_ajust * (44/28) / 1_000_000)
+
+    # Kernel N2O de 5 anos (distribuição anual)
+    kernel_n2o = np.zeros(dias_projecao, dtype=float)
     perfil_anual = np.array([PROFILE_N2O_LANDFILL.get(y, 0) for y in range(1, 6)])
     for ano_idx, peso in enumerate(perfil_anual):
         dia_inicio = ano_idx * 365
-        dia_fim = min((ano_idx + 1) * 365, dias)
-        n2o_diario[dia_inicio:dia_fim] = (massa_total_kg * fator_n2o_por_kg * peso) / 365
+        dia_fim = min((ano_idx + 1) * 365, dias_projecao)
+        if dia_inicio < dias_projecao:
+            dias_ano = dia_fim - dia_inicio
+            kernel_n2o[dia_inicio:dia_fim] = peso / dias_ano if dias_ano > 0 else 0
 
-    # Pré‑descarte (corrigido)
-    ch4_pre = np.zeros(dias)
-    n2o_pre = np.zeros(dias)
-    # CH4: constante durante os primeiros 3 dias (cada dia)
-    for d in range(min(3, dias)):
-        ch4_pre[d] = massa_total_kg * CH4_PRE_KG_POR_KG_DIA
-    # N2O: distribuição do total com perfil
-    for d_atraso, frac in PROFILE_N2O_PRE.items():
-        dia = d_atraso - 1
-        if dia < dias:
-            n2o_pre[dia] += massa_total_kg * N2O_PRE_TOTAL_KG_POR_KG * frac
+    n2o_aterro_diario = np.convolve(entrada, kernel_n2o, mode='full')[:dias_projecao] * fator_n2o_por_kg
 
-    ch4_total = ch4_diario + ch4_pre
-    n2o_total = n2o_diario + n2o_pre
+    # Pré-descarte N2O (distribuído nos 3 dias após cada entrada)
+    n2o_pre_diario = np.zeros(dias_projecao)
+    for d in range(dias_entrada):
+        for atraso, frac in PROFILE_N2O_PRE.items():
+            dia_emissao = d + atraso - 1
+            if dia_emissao < dias_projecao:
+                n2o_pre_diario[dia_emissao] += entrada[d] * N2O_PRE_KG_POR_KG_DIA * frac
+
+    ch4_total = ch4_diario + ch4_pre_diario
+    n2o_total = n2o_aterro_diario + n2o_pre_diario
     co2eq_dia = (ch4_total * GWP_CH4_20 + n2o_total * GWP_N2O_20) / 1000.0
     return ch4_total, n2o_total, co2eq_dia
 
-def calcular_emissoes_vermicompostagem_lote_unico(massa_total_kg):
+def calcular_emissoes_vermicompostagem_diario(massa_total_ano_kg, dias_projecao=DIAS_PROJECAO, dias_entrada=365):
     """
-    Lote único para vermicompostagem. Aplica o fator de umidade (dry_fraction)
-    igual ao app.py.
+    Emissões da vermicompostagem com lotes diários por 1 ano.
+    Retorna ch4_diario, n2o_diario arrays.
     """
-    dias = DIAS_PROJECAO
-    ch4_dia = np.zeros(dias)
-    n2o_dia = np.zeros(dias)
+    if massa_total_ano_kg <= 0:
+        return np.zeros(dias_projecao), np.zeros(dias_projecao)
 
-    dry_fraction = 1 - UMIDADE_PADRAO
-    massa_seca = massa_total_kg * dry_fraction
+    entrada = construir_lotes_diarios(massa_total_ano_kg, dias_entrada, dias_projecao)
+    ch4_diario = np.zeros(dias_projecao)
+    n2o_diario = np.zeros(dias_projecao)
 
-    ch4_total_lote = massa_seca * TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12)
-    n2o_total_lote = massa_seca * TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28)
+    # Perfis diários (CH4 e N2O) já normalizados
+    perfil_ch4 = p_ch4_vermi_org
+    perfil_n2o = p_n2o_vermi_org
+    dias_compostagem = len(perfil_ch4)
 
-    for d in range(DIAS_COMPOSTAGEM_ORGANICO):
-        ch4_dia[d] = ch4_total_lote * p_ch4_vermi_org[d]
-        n2o_dia[d] = n2o_total_lote * p_n2o_vermi_org[d]
+    # Fatores de emissão por kg de resíduo (base seca, umidade 85% → dry_fraction = 0.15)
+    dry_fraction = 1 - UMIDADE_PADRAO  # 0.15
+    ch4_por_kg = TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12) * dry_fraction
+    n2o_por_kg = TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28) * dry_fraction
 
-    return ch4_dia, n2o_dia
+    for d in range(dias_entrada):
+        # O lote no dia d emite ao longo dos próximos `dias_compostagem` dias
+        for t in range(min(dias_compostagem, dias_projecao - d)):
+            ch4_diario[d + t] += entrada[d] * ch4_por_kg * perfil_ch4[t]
+            n2o_diario[d + t] += entrada[d] * n2o_por_kg * perfil_n2o[t]
 
-def calcular_co2eq_aterro_lote_20anos(massa_t_ano, mcf):
-    """Retorna CO2eq total (t) do aterro para a massa anual (toneladas úmidas)."""
+    return ch4_diario, n2o_diario
+
+def calcular_co2eq_aterro_20anos(massa_t_ano, mcf):
+    """Emissões acumuladas de CO2eq do aterro em 20 anos, com lotes diários no primeiro ano."""
     if massa_t_ano <= 0 or mcf <= 0:
         return 0.0
     massa_kg = massa_t_ano * 1000
-    _, _, co2eq_dia = calcular_emissoes_aterro_lote_unico(
-        massa_kg, mcf, k_ano=0.06, temp_C=25.0, doc=0.15
-    )
+    _, _, co2eq_dia = calcular_emissoes_aterro_diario(massa_kg, mcf, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO)
     return co2eq_dia.sum()
 
-def calcular_co2eq_vermi_lote_20anos(massa_t_ano):
-    """Retorna CO2eq total (t) da vermicompostagem para a massa anual (toneladas úmidas)."""
+def calcular_co2eq_vermi_20anos(massa_t_ano):
+    """Emissões acumuladas de CO2eq da vermicompostagem em 20 anos, com lotes diários no primeiro ano."""
     if massa_t_ano <= 0:
         return 0.0
     massa_kg = massa_t_ano * 1000
-    ch4, n2o = calcular_emissoes_vermicompostagem_lote_unico(massa_kg)
+    ch4, n2o = calcular_emissoes_vermicompostagem_diario(massa_kg)
     co2eq = (ch4.sum() * GWP_CH4_20 + n2o.sum() * GWP_N2O_20) / 1000.0
     return co2eq
 
 # =========================================================
-# MCF por destino (mesma lógica do app.py)
+# MCF por destino
 # =========================================================
 def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     if pd.isna(destino):
@@ -502,8 +531,9 @@ if municipio == municipios[0]:
                 
                 receita_anual = 0.0
                 if massa_aterro_local > 0:
-                    co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_aterro_local, 0.8)
-                    co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro_local)
+                    # Usando o novo cálculo com lotes diários
+                    co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, 0.8)
+                    co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_local)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
                     receita_anual = (evitado_20anos / ANOS_PROJECAO) * preco * cambio
 
@@ -525,7 +555,7 @@ if municipio == municipios[0]:
             }), use_container_width=True, height=600)
 
             st.caption("""
-            - Cálculo baseado em **lote único** de resíduos (massa anual declarada).
+            - Cálculo baseado em **365 lotes diários** (massa anual distribuída uniformemente) ao longo de 1 ano, com projeção de emissões por 20 anos.
             - Receita potencial anual considerando o preço atual do carbono (cenário otimista GWP-20).
             """)
 
@@ -613,7 +643,7 @@ if not df_organicos.empty:
     for _, row in df_org_dest.iterrows():
         massa_t, mcf = row["MASSA_FLOAT"], row["MCF"]
         if mcf > 0 and massa_t > 0:
-            co2eq_aterro = calcular_co2eq_aterro_lote_20anos(massa_t, mcf)
+            co2eq_aterro = calcular_co2eq_aterro_20anos(massa_t, mcf)  # agora com lotes diários
             co2eq_aterro_total += co2eq_aterro
             massa_aterro_total += massa_t
             resultados.append({
@@ -626,7 +656,7 @@ if not df_organicos.empty:
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
 
-        co2eq_vermi = calcular_co2eq_vermi_lote_20anos(massa_aterro_total)
+        co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_total)  # agora com lotes diários
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
 
         col1, col2, col3, col4 = st.columns(4)
@@ -755,5 +785,6 @@ st.caption(f"""
 Fonte: SNIS (ano {ano_selecionado}) | Metodologia: IPCC 2006, Wang et al. (2017), Yang et al. (2017), Feng et al. (2020) |
 Baseline do aterro com CH₄ + N₂O; vermicompostagem: CH₄+N₂O (perfis diários) |
 Cotações em tempo real via Yahoo Finance e APIs de câmbio. |
-⚠️ Dados exibidos conforme SNIS, sem deduplicação. Transbordos podem ser ocultados com o checkbox.
+⚠️ Dados exibidos conforme SNIS, sem deduplicação. Transbordos podem ser ocultados com o checkbox. |
+🔄 Cálculo com lotes diários: massa anual dividida em 365 entradas diárias, projetadas por 20 anos.
 """)
