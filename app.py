@@ -93,7 +93,7 @@ def formatar_br(numero, auto_precision=True, casas_override=None):
     Se casas_override é fornecido, usa aquele número de casas.
     Caso contrário, se auto_precision=True:
         - >= 1 → 2 casas decimais
-        - < 1 → 4 casas decimais
+        - < 1  → 4 casas decimais
     """
     if pd.isna(numero) or numero is None:
         return "N/A"
@@ -117,6 +117,7 @@ def formatar_br(numero, auto_precision=True, casas_override=None):
 def formatar_numero_br(valor, decimais=None, auto_precision=True):
     """
     Versão de compatibilidade – se 'decimais' for None, usa a lógica automática.
+    Se 'decimais' for um número, força aquela quantidade de casas (ignora auto).
     """
     if decimais is not None:
         return formatar_br(valor, auto_precision=False, casas_override=decimais)
@@ -569,9 +570,9 @@ if municipio == municipios[0]:
             df_mapeamento = pd.DataFrame(mapeamento).sort_values("Massa Total (t/ano)", ascending=False)
 
             st.dataframe(df_mapeamento.style.format({
-                "Massa Total (t/ano)": lambda x: formatar_numero_br(x, 1),
-                "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, 1),
-                "Receita Potencial (R$/ano)": lambda x: f"R$ {formatar_numero_br(x, 2)}"
+                "Massa Total (t/ano)": lambda x: formatar_numero_br(x, None),          # auto
+                "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, None),   # auto
+                "Receita Potencial (R$/ano)": lambda x: f"R$ {formatar_numero_br(x, None)}"  # auto
             }), use_container_width=True, height=600)
 
             st.caption("""
@@ -663,27 +664,27 @@ if not df_organicos.empty:
     for _, row in df_org_dest.iterrows():
         massa_t, mcf = row["MASSA_FLOAT"], row["MCF"]
         if mcf > 0 and massa_t > 0:
-            co2eq_aterro = calcular_co2eq_aterro_20anos(massa_t, mcf)  # agora com lotes diários
+            co2eq_aterro = calcular_co2eq_aterro_20anos(massa_t, mcf)
             co2eq_aterro_total += co2eq_aterro
             massa_aterro_total += massa_t
             resultados.append({
                 "Tipo de Unidade (SNIS)": row[COL_DESTINO],
-                "Massa (t)": formatar_numero_br(massa_t),
-                "MCF": formatar_numero_br(mcf, 2),
-                "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro, 1)
+                "Massa (t)": formatar_numero_br(massa_t),          # auto
+                "MCF": formatar_numero_br(mcf),                    # auto (agora <1 → 4 casas)
+                "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro)  # auto
             })
 
     if resultados:
         st.dataframe(pd.DataFrame(resultados), use_container_width=True)
 
-        co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_total)  # agora com lotes diários
+        co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_total)
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))
-        col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total, 1)} tCO₂e")
-        col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi, 1)} tCO₂e")
-        col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi, 1)} tCO₂e")
+        col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))          # chama formatar_br (auto)
+        col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total)} tCO₂e")  # auto
+        col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi)} tCO₂e") # auto
+        col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi)} tCO₂e")             # auto
 
         # ============================================================
         # 💰 POTENCIAL DE CRÉDITOS DE CARBONO (COM COTAÇÕES ATUALIZÁVEIS)
@@ -725,7 +726,7 @@ if not df_organicos.empty:
 
         with st.expander("ℹ️ Como interpretar"):
             st.markdown(f"""
-            - **Emissões evitadas:** {formatar_numero_br(evitado_vermi, 1)} tCO₂e
+            - **Emissões evitadas:** {formatar_numero_br(evitado_vermi)} tCO₂e
             - **Preço do carbono:** {moeda} {formatar_br(preco)}/tCO₂e
             - **Câmbio:** R$ {formatar_br(cambio)}/€
             """)
