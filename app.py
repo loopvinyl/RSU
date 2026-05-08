@@ -135,32 +135,34 @@ def classificar_tipo_aterro(mcf):
         return "Não Aterro"
 
 # =========================================================
-# PARÂMETROS GERAIS (tco2eq)
+# PARÂMETROS GERAIS (alinhados com app.py)
 # =========================================================
 GWP_CH4_20 = 79.7
 GWP_N2O_20 = 273.0
 ANOS_PROJECAO = 20
 DIAS_PROJECAO = ANOS_PROJECAO * 365
-UMIDADE_PADRAO = 0.85
-PHI_BASELINE = 0.85
+UMIDADE_PADRAO = 0.85          # fração de umidade do resíduo
+PHI_BASELINE = 0.85            # fator φ para clima úmido (UNFCCC 2024)
 CAPTURA_CH4 = 0.0
 
-# Pré‑descarte
-CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000
-N2O_PRE_KG_POR_KG_DIA = (20.26 / 3) * (44/28) / 1_000_000
+# Pré‑descarte (valores idênticos ao app.py)
+# CH4: 2,78 μg C kg⁻¹ h⁻¹ -> kg CH4 kg⁻¹ dia⁻¹
+CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000_000
+# N2O: total de 20,26 mg N kg⁻¹ (Feng et al. 2020)
+N2O_PRE_TOTAL_KG_POR_KG = 20.26 * (44/28) / 1_000_000
 PROFILE_N2O_PRE = {1: 0.8623, 2: 0.10, 3: 0.0377}
 PROFILE_N2O_LANDFILL = {1: 0.10, 2: 0.30, 3: 0.40, 4: 0.15, 5: 0.05}
 
-# Parâmetros por tipo
-T_ORGANICO, DOC_ORGANICO, k_ano_ORGANICO = 25.0, 0.15, 0.06
-TOC_ORGANICO, TN_ORGANICO = 0.436, 14.2 / 1000
-CH4_C_FRAC_YANG_ORGANICO = 0.13 / 100
-CH4_C_FRAC_THERMO_ORGANICO = 0.006
-N2O_N_FRAC_YANG_ORGANICO = 0.92 / 100
-N2O_N_FRAC_THERMO_ORGANICO = 0.0196
+# Parâmetros da fração orgânica (baseado em Yang et al. 2017)
+TOC_ORGANICO = 0.436
+TN_ORGANICO = 0.0142           # 14,2 g/kg = 0,0142
+CH4_C_FRAC_YANG_ORGANICO = 0.0013   # f_CH4_vermi
+CH4_C_FRAC_THERMO_ORGANICO = 0.0060 # f_CH4_thermo
+N2O_N_FRAC_YANG_ORGANICO = 0.0092   # f_N2O_vermi
+N2O_N_FRAC_THERMO_ORGANICO = 0.0196 # f_N2O_thermo
 DIAS_COMPOSTAGEM_ORGANICO = 50
 
-# Perfis (já normalizados)
+# Perfis diários de emissão (idênticos ao app.py)
 def carregar_perfis():
     p_ch4_vermi_org = np.array([
         0.02, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06,
@@ -185,36 +187,47 @@ def carregar_perfis():
 (p_ch4_vermi_org, p_n2o_vermi_org) = carregar_perfis()
 
 # =========================================================
-# FUNÇÕES DE CÁLCULO – LOTE ÚNICO
+# FUNÇÕES DE CÁLCULO (alinhadas com GHGEmissionCalculator do app.py)
 # =========================================================
 def calcular_emissoes_aterro_lote_unico(massa_total_kg, mcf, k_ano, temp_C, doc, dias=DIAS_PROJECAO):
+    """
+    Lote único de massa_total_kg (úmida). Calcula emissões diárias de CH4 e N2O.
+    """
+    # Potencial de metano (IPCC)
     docf = 0.0147 * temp_C + 0.28
-    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)
+    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)   # F=0.5, OX=0.1, Ri=0
 
     t = np.arange(1, dias + 1, dtype=float)
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
-
     ch4_diario = massa_total_kg * ch4_pot_por_kg * kernel_ch4
     ch4_diario *= PHI_BASELINE * (1 - CAPTURA_CH4)
 
-    n2o_diario = np.zeros(dias)
-    opening = np.clip((100.0 / (massa_total_kg / 365)) * (8.0 / 24), 0.0, 1.0) if massa_total_kg > 0 else 0.0
+    # Emissões de N2O no aterro (Wang et al. 2017)
+    # opening factor baseado na massa diária média (massa_total_kg / 365)
+    massa_dia_media = massa_total_kg / 365 if massa_total_kg > 0 else 0
+    opening = np.clip((100.0 / massa_dia_media) * (8.0 / 24), 0.0, 1.0) if massa_dia_media > 0 else 0.0
     E_avg = opening * 1.91 + (1 - opening) * 2.15
     E_avg *= (1 - UMIDADE_PADRAO) / (1 - 0.55)
     fator_n2o_por_kg = (E_avg * (44/28) / 1_000_000)
+
+    n2o_diario = np.zeros(dias)
     perfil_anual = np.array([PROFILE_N2O_LANDFILL.get(y, 0) for y in range(1, 6)])
     for ano_idx, peso in enumerate(perfil_anual):
         dia_inicio = ano_idx * 365
         dia_fim = min((ano_idx + 1) * 365, dias)
         n2o_diario[dia_inicio:dia_fim] = (massa_total_kg * fator_n2o_por_kg * peso) / 365
 
+    # Pré‑descarte (corrigido)
     ch4_pre = np.zeros(dias)
     n2o_pre = np.zeros(dias)
-    ch4_pre[:3] = massa_total_kg * CH4_PRE_KG_POR_KG_DIA / 3
+    # CH4: constante durante os primeiros 3 dias (cada dia)
+    for d in range(min(3, dias)):
+        ch4_pre[d] = massa_total_kg * CH4_PRE_KG_POR_KG_DIA
+    # N2O: distribuição do total com perfil
     for d_atraso, frac in PROFILE_N2O_PRE.items():
         dia = d_atraso - 1
         if dia < dias:
-            n2o_pre[dia] += massa_total_kg * N2O_PRE_KG_POR_KG_DIA * frac
+            n2o_pre[dia] += massa_total_kg * N2O_PRE_TOTAL_KG_POR_KG * frac
 
     ch4_total = ch4_diario + ch4_pre
     n2o_total = n2o_diario + n2o_pre
@@ -222,12 +235,19 @@ def calcular_emissoes_aterro_lote_unico(massa_total_kg, mcf, k_ano, temp_C, doc,
     return ch4_total, n2o_total, co2eq_dia
 
 def calcular_emissoes_vermicompostagem_lote_unico(massa_total_kg):
+    """
+    Lote único para vermicompostagem. Aplica o fator de umidade (dry_fraction)
+    igual ao app.py.
+    """
     dias = DIAS_PROJECAO
     ch4_dia = np.zeros(dias)
     n2o_dia = np.zeros(dias)
 
-    ch4_total_lote = massa_total_kg * TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12)
-    n2o_total_lote = massa_total_kg * TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28)
+    dry_fraction = 1 - UMIDADE_PADRAO
+    massa_seca = massa_total_kg * dry_fraction
+
+    ch4_total_lote = massa_seca * TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12)
+    n2o_total_lote = massa_seca * TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28)
 
     for d in range(DIAS_COMPOSTAGEM_ORGANICO):
         ch4_dia[d] = ch4_total_lote * p_ch4_vermi_org[d]
@@ -236,13 +256,17 @@ def calcular_emissoes_vermicompostagem_lote_unico(massa_total_kg):
     return ch4_dia, n2o_dia
 
 def calcular_co2eq_aterro_lote_20anos(massa_t_ano, mcf):
+    """Retorna CO2eq total (t) do aterro para a massa anual (toneladas úmidas)."""
     if massa_t_ano <= 0 or mcf <= 0:
         return 0.0
     massa_kg = massa_t_ano * 1000
-    _, _, co2eq_dia = calcular_emissoes_aterro_lote_unico(massa_kg, mcf, k_ano_ORGANICO, T_ORGANICO, DOC_ORGANICO)
+    _, _, co2eq_dia = calcular_emissoes_aterro_lote_unico(
+        massa_kg, mcf, k_ano=0.06, temp_C=25.0, doc=0.15
+    )
     return co2eq_dia.sum()
 
 def calcular_co2eq_vermi_lote_20anos(massa_t_ano):
+    """Retorna CO2eq total (t) da vermicompostagem para a massa anual (toneladas úmidas)."""
     if massa_t_ano <= 0:
         return 0.0
     massa_kg = massa_t_ano * 1000
@@ -251,7 +275,7 @@ def calcular_co2eq_vermi_lote_20anos(massa_t_ano):
     return co2eq
 
 # =========================================================
-# MCF por destino
+# MCF por destino (mesma lógica do app.py)
 # =========================================================
 def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     if pd.isna(destino):
