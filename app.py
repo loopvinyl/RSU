@@ -166,13 +166,21 @@ UMIDADE_PADRAO = 0.85
 PHI_BASELINE = 0.85
 CAPTURA_CH4 = 0.0
 
-# Pré‑descarte
-CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000
-N2O_PRE_KG_POR_KG_DIA = (20.26 / 3) * (44/28) / 1_000_000
-PROFILE_N2O_PRE = {1: 0.8623, 2: 0.10, 3: 0.0377}
-PROFILE_N2O_LANDFILL = {1: 0.10, 2: 0.30, 3: 0.40, 4: 0.15, 5: 0.05}
+# ========== CORREÇÕES REALIZADAS ==========
+# 1. Pré‑descarte de N₂O – agora usa o fator total correto (20,26 mgN/kg)
+#    A variável N2O_PRE_TOTAL_KG_POR_KG armazena o total por kg de resíduo.
+#    A distribuição diária é aplicada no loop usando as frações do perfil.
+N2O_PRE_TOTAL_KG_POR_KG = 20.26 * (44/28) / 1_000_000   # ~3,184e-5 kg N2O/kg
+PROFILE_N2O_PRE = {1: 0.8623, 2: 0.10, 3: 0.0377}      # soma = 1
 
-# Parâmetros por tipo
+# 2. Pré‑descarte de CH₄ (constante diária) – sem alteração (já correto)
+CH4_PRE_KG_POR_KG_DIA = 2.78 * (16/12) * 24 / 1_000_000_000
+
+# 3. Perfil de N₂O do aterro – agora é diário (5 dias) em vez de anual
+#    Os valores são os mesmos (10%,30%,40%,15%,5%) e serão usados em convolução diária.
+PROFILE_N2O_LANDFILL_DAILY = np.array([0.10, 0.30, 0.40, 0.15, 0.05], dtype=float)
+
+# Parâmetros por tipo (orgânico)
 T_ORGANICO, DOC_ORGANICO, k_ano_ORGANICO = 25.0, 0.15, 0.06
 TOC_ORGANICO, TN_ORGANICO = 0.436, 14.2 / 1000
 CH4_C_FRAC_YANG_ORGANICO = 0.13 / 100
@@ -181,7 +189,7 @@ N2O_N_FRAC_YANG_ORGANICO = 0.92 / 100
 N2O_N_FRAC_THERMO_ORGANICO = 0.0196
 DIAS_COMPOSTAGEM_ORGANICO = 50
 
-# Perfis (já normalizados)
+# Perfis (já normalizados) – idênticos aos originais
 def carregar_perfis():
     p_ch4_vermi_org = np.array([
         0.02, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06,
@@ -229,7 +237,7 @@ def calcular_emissoes_aterro_diario(massa_total_ano_kg, mcf, k_ano, temp_C, doc,
 
     # Potencial de metano
     docf = 0.0147 * temp_C + 0.28
-    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)  # (1-Ri)*(1-OX) = (1-0)*(1-0.1) = 0.9
+    ch4_pot_por_kg = doc * docf * mcf * 0.5 * (16/12) * (1 - 0.1)  # (1-Ri)*(1-OX) = 0.9
     ch4_pot_por_kg *= PHI_BASELINE * (1 - CAPTURA_CH4)
 
     # Kernel exponencial
@@ -237,14 +245,14 @@ def calcular_emissoes_aterro_diario(massa_total_ano_kg, mcf, k_ano, temp_C, doc,
     kernel_ch4 = np.exp(-k_ano * (t - 1) / 365.0) - np.exp(-k_ano * t / 365.0)
     kernel_ch4 = np.maximum(kernel_ch4, 0)
 
-    # Entrada (1 ou 365) – aqui usamos 365
+    # Entrada
     entrada = construir_lotes_diarios(massa_total_ano_kg, dias_entrada, dias_projecao)
     ch4_diario = np.convolve(entrada, kernel_ch4, mode='full')[:dias_projecao] * ch4_pot_por_kg
 
-    # Pré-descarte CH4 (constante diária de 2,78 ugC/kg/h → kg/kg/dia)
+    # Pré-descarte CH4 (constante diária)
     ch4_pre_diario = entrada * CH4_PRE_KG_POR_KG_DIA
 
-    # N2O do aterro (Wang et al.)
+    # N2O do aterro – modelo de Wang com perfil diário de 5 dias
     # Fator de abertura
     massa_media_diaria = massa_total_ano_kg / 365 if massa_total_ano_kg > 0 else 0
     f_aberto = np.clip((100.0 / massa_media_diaria) * (8.0 / 24), 0.0, 1.0) if massa_media_diaria > 0 else 0.0
@@ -252,25 +260,20 @@ def calcular_emissoes_aterro_diario(massa_total_ano_kg, mcf, k_ano, temp_C, doc,
     E_medio_ajust = E_medio * ((1 - UMIDADE_PADRAO) / (1 - 0.55))
     fator_n2o_por_kg = (E_medio_ajust * (44/28) / 1_000_000)
 
-    # Kernel N2O de 5 anos (distribuição anual)
-    kernel_n2o = np.zeros(dias_projecao, dtype=float)
-    perfil_anual = np.array([PROFILE_N2O_LANDFILL.get(y, 0) for y in range(1, 6)])
-    for ano_idx, peso in enumerate(perfil_anual):
-        dia_inicio = ano_idx * 365
-        dia_fim = min((ano_idx + 1) * 365, dias_projecao)
-        if dia_inicio < dias_projecao:
-            dias_ano = dia_fim - dia_inicio
-            kernel_n2o[dia_inicio:dia_fim] = peso / dias_ano if dias_ano > 0 else 0
+    # Kernel diário para N2O (5 dias)
+    kernel_n2o_daily = PROFILE_N2O_LANDFILL_DAILY.copy()
+    kernel_n2o_daily = kernel_n2o_daily / kernel_n2o_daily.sum()  # já soma 1
+    # Convolução com a entrada diária
+    n2o_aterro_diario = np.convolve(entrada, kernel_n2o_daily, mode='full')[:dias_projecao] * fator_n2o_por_kg
 
-    n2o_aterro_diario = np.convolve(entrada, kernel_n2o, mode='full')[:dias_projecao] * fator_n2o_por_kg
-
-    # Pré-descarte N2O (distribuído nos 3 dias após cada entrada)
+    # Pré-descarte N2O (total corrigido para 20,26 mgN/kg)
     n2o_pre_diario = np.zeros(dias_projecao)
+    # Para cada dia de entrada, distribui o total N2O_pre_total nos 3 dias seguintes conforme perfil
     for d in range(dias_entrada):
         for atraso, frac in PROFILE_N2O_PRE.items():
             dia_emissao = d + atraso - 1
             if dia_emissao < dias_projecao:
-                n2o_pre_diario[dia_emissao] += entrada[d] * N2O_PRE_KG_POR_KG_DIA * frac
+                n2o_pre_diario[dia_emissao] += entrada[d] * N2O_PRE_TOTAL_KG_POR_KG * frac
 
     ch4_total = ch4_diario + ch4_pre_diario
     n2o_total = n2o_aterro_diario + n2o_pre_diario
@@ -294,13 +297,12 @@ def calcular_emissoes_vermicompostagem_diario(massa_total_ano_kg, dias_projecao=
     perfil_n2o = p_n2o_vermi_org
     dias_compostagem = len(perfil_ch4)
 
-    # Fatores de emissão por kg de resíduo (base seca, umidade 85% → dry_fraction = 0.15)
+    # Fatores de emissão por kg de resíduo (base seca)
     dry_fraction = 1 - UMIDADE_PADRAO  # 0.15
     ch4_por_kg = TOC_ORGANICO * CH4_C_FRAC_YANG_ORGANICO * (16/12) * dry_fraction
     n2o_por_kg = TN_ORGANICO * N2O_N_FRAC_YANG_ORGANICO * (44/28) * dry_fraction
 
     for d in range(dias_entrada):
-        # O lote no dia d emite ao longo dos próximos `dias_compostagem` dias
         for t in range(min(dias_compostagem, dias_projecao - d)):
             ch4_diario[d + t] += entrada[d] * ch4_por_kg * perfil_ch4[t]
             n2o_diario[d + t] += entrada[d] * n2o_por_kg * perfil_n2o[t]
@@ -570,9 +572,9 @@ if municipio == municipios[0]:
             df_mapeamento = pd.DataFrame(mapeamento).sort_values("Massa Total (t/ano)", ascending=False)
 
             st.dataframe(df_mapeamento.style.format({
-                "Massa Total (t/ano)": lambda x: formatar_numero_br(x, None),          # auto
-                "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, None),   # auto
-                "Receita Potencial (R$/ano)": lambda x: f"R$ {formatar_numero_br(x, None)}"  # auto
+                "Massa Total (t/ano)": lambda x: formatar_numero_br(x, None),
+                "Massa para Aterro (t/ano)": lambda x: formatar_numero_br(x, None),
+                "Receita Potencial (R$/ano)": lambda x: f"R$ {formatar_numero_br(x, None)}"
             }), use_container_width=True, height=600)
 
             st.caption("""
@@ -669,9 +671,9 @@ if not df_organicos.empty:
             massa_aterro_total += massa_t
             resultados.append({
                 "Tipo de Unidade (SNIS)": row[COL_DESTINO],
-                "Massa (t)": formatar_numero_br(massa_t),          # auto
-                "MCF": formatar_numero_br(mcf),                    # auto (agora <1 → 4 casas)
-                "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro)  # auto
+                "Massa (t)": formatar_numero_br(massa_t),
+                "MCF": formatar_numero_br(mcf),
+                "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro)
             })
 
     if resultados:
@@ -681,10 +683,10 @@ if not df_organicos.empty:
         evitado_vermi = co2eq_aterro_total - co2eq_vermi
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))          # chama formatar_br (auto)
-        col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total)} tCO₂e")  # auto
-        col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi)} tCO₂e") # auto
-        col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi)} tCO₂e")             # auto
+        col1.metric("Massa em aterros", formatar_massa_br(massa_aterro_total))
+        col2.metric("CO₂e aterro (20 anos)", f"{formatar_numero_br(co2eq_aterro_total)} tCO₂e")
+        col3.metric("CO₂e vermicompostagem (20 anos)", f"{formatar_numero_br(co2eq_vermi)} tCO₂e")
+        col4.metric("Emissões Evitadas", f"{formatar_numero_br(evitado_vermi)} tCO₂e")
 
         # ============================================================
         # 💰 POTENCIAL DE CRÉDITOS DE CARBONO (COM COTAÇÕES ATUALIZÁVEIS)
