@@ -540,8 +540,23 @@ if municipio == municipios[0]:
     # Pivot para empilhamento
     pivot = df_plot.pivot(index=COL_UF, columns="DESTINO_CAT", values="prop").fillna(0)
 
-    # --- ORDENAÇÃO: pela massa total de ATERRO SANITÁRIO (maior para menor) ---
-    # Palavras-chave para identificar aterro sanitário
+    # --- ORDENAÇÃO DAS CATEGORIAS NA LEGENDA (conforme tabela anexa) ---
+    ordem_legenda = [
+        "Aterro sanitário",
+        "Lixão ou vazadouro",
+        "Aterro controlado",
+        "Aterro de inertes",
+        "Unidade de triagem (galpão ou usina)",
+        "Unidade de manejo de resíduos de áreas verdes (galhadas e podas)",
+        "Unidade de compostagem",
+        "Unidade de coprocessamento",
+        "Outros"
+    ]
+    # Reordenar as colunas do pivot conforme a ordem desejada (apenas as que existem)
+    colunas_existentes = [col for col in ordem_legenda if col in pivot.columns]
+    pivot = pivot[colunas_existentes]
+
+    # --- ORDENAÇÃO DAS UFs pela massa total de ATERRO SANITÁRIO (maior para menor) ---
     aterro_keywords = ["aterro sanitario", "aterro sanitário"]
     def is_aterro(destino):
         if pd.isna(destino):
@@ -549,11 +564,8 @@ if municipio == municipios[0]:
         dest_norm = normalizar_texto(destino)
         return any(kw in dest_norm for kw in aterro_keywords)
 
-    # Calcula, para cada UF, a soma da massa dos destinos que são aterro sanitário
     df_aterro = df_agg_graf[df_agg_graf[COL_DESTINO].apply(is_aterro)]
     massa_aterro_por_uf = df_aterro.groupby(COL_UF)["MASSA_FLOAT"].sum().sort_values(ascending=False)
-
-    # Ordenar o pivot pela massa de aterro (maior primeiro)
     uf_order_aterro = massa_aterro_por_uf.index.tolist()
     todas_ufs = pivot.index.tolist()
     uf_order = [uf for uf in uf_order_aterro if uf in todas_ufs] + [uf for uf in todas_ufs if uf not in uf_order_aterro]
@@ -564,7 +576,7 @@ if municipio == municipios[0]:
     fig.patch.set_facecolor('#0e1117')
     ax.set_facecolor('#0e1117')
 
-    # Cores da paleta viridis (discretas)
+    # Cores da paleta viridis (discretas) – aplicadas na ordem da legenda
     cores = plt.cm.viridis(np.linspace(0, 1, len(pivot.columns)))
     bottom = np.zeros(len(pivot))
 
@@ -587,7 +599,7 @@ if municipio == municipios[0]:
         spine.set_color('gray')
 
     st.pyplot(fig)
-    st.caption("Gráfico de barras horizontais empilhadas – ordenado pela quantidade de resíduos destinados a aterros sanitários (maior para menor). O comprimento de cada cor mostra a proporção (em massa) destinada àquele tipo de unidade.")
+    st.caption("Gráfico de barras horizontais empilhadas – ordenado pela quantidade de resíduos destinados a aterros sanitários (maior para menor). A legenda segue a ordem decrescente de participação nacional.")
 
 # ============================================================
 # 🏆 RANKING MUNICIPAL (antes dos orgânicos, com métricas adicionais)
