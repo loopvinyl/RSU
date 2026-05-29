@@ -529,7 +529,7 @@ if municipio == municipios[0]:
     # Calcular proporção dentro de cada UF
     df_agg_graf["prop"] = df_agg_graf.groupby(COL_UF)["MASSA_FLOAT"].transform(lambda x: x / x.sum())
 
-    # Definir os N destinos mais importantes (globalmente) para evitar muitas categorias
+    # Agrupar categorias raras em "Outros" (top 6 destinos por massa total)
     top_n = 6
     destinos_importantes = df_agg_graf.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().nlargest(top_n).index.tolist()
     df_agg_graf["DESTINO_CAT"] = df_agg_graf[COL_DESTINO].apply(lambda x: x if x in destinos_importantes else "Outros")
@@ -537,15 +537,18 @@ if municipio == municipios[0]:
     # Reagregar com a nova categoria
     df_plot = df_agg_graf.groupby([COL_UF, "DESTINO_CAT"])["prop"].sum().reset_index()
 
-    # Pivot para facilitar o empilhamento
+    # Pivot para empilhamento
     pivot = df_plot.pivot(index=COL_UF, columns="DESTINO_CAT", values="prop").fillna(0)
 
-    # Ordenar UFs por proporção de "Outros" decrescente (ou qualquer critério) – aqui ordenamos pela massa total (já temos a lista)
-    uf_order = df_agg_graf.groupby(COL_UF)["MASSA_FLOAT"].sum().sort_values(ascending=False).index.tolist()
-    pivot = pivot.reindex(uf_order)
+    # Calcular massa total por UF (para ordenar do maior para o menor)
+    massa_por_uf = df_graf.groupby(COL_UF)["MASSA_FLOAT"].sum().sort_values(ascending=False)
+    # Ordenar o pivot pela mesma ordem (maior massa no topo da barra horizontal = primeiro na lista)
+    pivot = pivot.reindex(massa_por_uf.index)
 
-    # Criar gráfico de barras horizontais empilhadas
+    # Criar figura com fundo escuro
     fig, ax = plt.subplots(figsize=(12, 8))
+    fig.patch.set_facecolor('#0e1117')  # fundo da figura igual ao dark mode do Streamlit
+    ax.set_facecolor('#0e1117')
 
     # Cores da paleta viridis (discretas)
     cores = plt.cm.viridis(np.linspace(0, 1, len(pivot.columns)))
@@ -553,20 +556,24 @@ if municipio == municipios[0]:
 
     for i, destino in enumerate(pivot.columns):
         valores = pivot[destino].values
-        ax.barh(pivot.index, valores, left=bottom, label=destino, color=cores[i])
+        ax.barh(pivot.index, valores, left=bottom, label=destino, color=cores[i], edgecolor='none')
         bottom += valores
 
-    ax.set_xlabel("Proporção da massa coletada")
-    ax.set_ylabel("Unidade da Federação")
-    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})")
-    ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left')
-    ax.grid(axis='x', linestyle='--', alpha=0.7)
-
-    # Formatar eixo x como percentual
+    # Configurar estética escura
+    ax.set_xlabel("Proporção da massa coletada", color='white')
+    ax.set_ylabel("Unidade da Federação", color='white')
+    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})\n(ordenado da UF com maior massa total para a menor)", color='white', fontsize=14)
+    ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left', facecolor='#0e1117', edgecolor='gray', labelcolor='white')
+    ax.grid(axis='x', linestyle='--', alpha=0.3, color='gray')
+    ax.tick_params(colors='white', axis='both')
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
 
+    # Ajustar cor dos spines
+    for spine in ax.spines.values():
+        spine.set_color('gray')
+
     st.pyplot(fig)
-    st.caption("Gráfico de barras horizontais empilhadas – cada barra representa um estado e o comprimento de cada cor mostra a proporção (em massa) destinada àquele tipo de unidade.")
+    st.caption("Gráfico de barras horizontais empilhadas – cada barra representa um estado (ordenado da maior massa total coletada para a menor). O comprimento de cada cor mostra a proporção (em massa) destinada àquele tipo de unidade. Fundo escuro para integração visual com o tema do aplicativo.")
 
 # ============================================================
 # 🏆 RANKING MUNICIPAL (antes dos orgânicos, com métricas adicionais)
