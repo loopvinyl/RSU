@@ -507,6 +507,67 @@ if municipio == municipios[0]:
         use_container_width=True
     )
 
+    # =========================================================
+    # 📊 GRÁFICO DE BARRAS HORIZONTAIS EMPILHADAS (PROPORÇÃO POR UF)
+    # =========================================================
+    st.markdown("---")
+    st.subheader(f"📊 Proporção da destinação de resíduos por UF ({ano_selecionado})")
+
+    # Checkbox específico para este gráfico
+    ocultar_transbordo_grafico = st.checkbox("Ocultar transbordos no gráfico", value=False, key="ocultar_transbordo_grafico")
+
+    df_graf = df_mun.copy()
+    if ocultar_transbordo_grafico:
+        df_graf = df_graf[~df_graf[COL_DESTINO].apply(
+            lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
+        )]
+
+    # Agrupar por UF e destino, somar massa
+    df_agg_graf = df_graf.groupby([COL_UF, COL_DESTINO])["MASSA_FLOAT"].sum().reset_index()
+    df_agg_graf = df_agg_graf[df_agg_graf["MASSA_FLOAT"] > 0]
+
+    # Calcular proporção dentro de cada UF
+    df_agg_graf["prop"] = df_agg_graf.groupby(COL_UF)["MASSA_FLOAT"].transform(lambda x: x / x.sum())
+
+    # Definir os N destinos mais importantes (globalmente) para evitar muitas categorias
+    top_n = 6
+    destinos_importantes = df_agg_graf.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().nlargest(top_n).index.tolist()
+    df_agg_graf["DESTINO_CAT"] = df_agg_graf[COL_DESTINO].apply(lambda x: x if x in destinos_importantes else "Outros")
+
+    # Reagregar com a nova categoria
+    df_plot = df_agg_graf.groupby([COL_UF, "DESTINO_CAT"])["prop"].sum().reset_index()
+
+    # Pivot para facilitar o empilhamento
+    pivot = df_plot.pivot(index=COL_UF, columns="DESTINO_CAT", values="prop").fillna(0)
+
+    # Ordenar UFs por proporção de "Outros" decrescente (ou qualquer critério) – aqui ordenamos pela massa total (já temos a lista)
+    uf_order = df_agg_graf.groupby(COL_UF)["MASSA_FLOAT"].sum().sort_values(ascending=False).index.tolist()
+    pivot = pivot.reindex(uf_order)
+
+    # Criar gráfico de barras horizontais empilhadas
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Cores da paleta viridis (discretas)
+    cores = plt.cm.viridis(np.linspace(0, 1, len(pivot.columns)))
+    bottom = np.zeros(len(pivot))
+
+    for i, destino in enumerate(pivot.columns):
+        valores = pivot[destino].values
+        ax.barh(pivot.index, valores, left=bottom, label=destino, color=cores[i])
+        bottom += valores
+
+    ax.set_xlabel("Proporção da massa coletada")
+    ax.set_ylabel("Unidade da Federação")
+    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})")
+    ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.grid(axis='x', linestyle='--', alpha=0.7)
+
+    # Formatar eixo x como percentual
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
+
+    st.pyplot(fig)
+    st.caption("Gráfico de barras horizontais empilhadas – cada barra representa um estado e o comprimento de cada cor mostra a proporção (em massa) destinada àquele tipo de unidade.")
+
 # ============================================================
 # 🏆 RANKING MUNICIPAL (antes dos orgânicos, com métricas adicionais)
 # ============================================================
