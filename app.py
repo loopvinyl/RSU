@@ -356,9 +356,6 @@ def load_data(ano):
 
 df = load_data(ano_selecionado)
 
-# =========================================================
-# Definição dos índices das colunas (mesmo método original)
-# =========================================================
 COL_CODIGO_ROTA = df.columns[16]
 COL_MUNICIPIO = df.columns[2]
 COL_TIPO_COLETA = df.columns[17]
@@ -366,14 +363,12 @@ COL_MASSA = df.columns[24]
 COL_DESTINO = df.columns[28]
 COL_UF = df.columns[3]
 
-# Renomeia para nomes amigáveis
 df = df.rename(columns={
     COL_MUNICIPIO: "MUNICÍPIO",
     COL_TIPO_COLETA: "TIPO_COLETA_EXECUTADA",
     COL_MASSA: "MASSA_COLETADA"
 })
 
-# Atualiza os nomes das variáveis para usar os novos nomes
 COL_MUNICIPIO = "MUNICÍPIO"
 COL_TIPO_COLETA = "TIPO_COLETA_EXECUTADA"
 COL_MASSA = "MASSA_COLETADA"
@@ -507,74 +502,6 @@ if municipio == municipios[0]:
         use_container_width=True
     )
 
-    # =========================================================
-    # 📊 GRÁFICO DE BARRAS HORIZONTAIS EMPILHADAS (PROPORÇÃO POR UF)
-    # =========================================================
-    st.markdown("---")
-    st.subheader(f"📊 Proporção da destinação de resíduos por UF ({ano_selecionado})")
-
-    # Checkbox específico para este gráfico
-    ocultar_transbordo_grafico = st.checkbox("Ocultar transbordos no gráfico", value=False, key="ocultar_transbordo_grafico")
-
-    df_graf = df_mun.copy()
-    if ocultar_transbordo_grafico:
-        df_graf = df_graf[~df_graf[COL_DESTINO].apply(
-            lambda x: "TRANSBORDO" in normalizar_texto(x) if pd.notna(x) else False
-        )]
-
-    # Agrupar por UF e destino, somar massa
-    df_agg_graf = df_graf.groupby([COL_UF, COL_DESTINO])["MASSA_FLOAT"].sum().reset_index()
-    df_agg_graf = df_agg_graf[df_agg_graf["MASSA_FLOAT"] > 0]
-
-    # Calcular proporção dentro de cada UF
-    df_agg_graf["prop"] = df_agg_graf.groupby(COL_UF)["MASSA_FLOAT"].transform(lambda x: x / x.sum())
-
-    # Agrupar categorias raras em "Outros" (top 6 destinos por massa total)
-    top_n = 6
-    destinos_importantes = df_agg_graf.groupby(COL_DESTINO)["MASSA_FLOAT"].sum().nlargest(top_n).index.tolist()
-    df_agg_graf["DESTINO_CAT"] = df_agg_graf[COL_DESTINO].apply(lambda x: x if x in destinos_importantes else "Outros")
-
-    # Reagregar com a nova categoria
-    df_plot = df_agg_graf.groupby([COL_UF, "DESTINO_CAT"])["prop"].sum().reset_index()
-
-    # Pivot para empilhamento
-    pivot = df_plot.pivot(index=COL_UF, columns="DESTINO_CAT", values="prop").fillna(0)
-
-    # Calcular massa total por UF (para ordenar do maior para o menor)
-    massa_por_uf = df_graf.groupby(COL_UF)["MASSA_FLOAT"].sum().sort_values(ascending=False)
-    # Ordenar o pivot pela mesma ordem (maior massa no topo da barra horizontal = primeiro na lista)
-    pivot = pivot.reindex(massa_por_uf.index)
-
-    # Criar figura com fundo escuro
-    fig, ax = plt.subplots(figsize=(12, 8))
-    fig.patch.set_facecolor('#0e1117')  # fundo da figura igual ao dark mode do Streamlit
-    ax.set_facecolor('#0e1117')
-
-    # Cores da paleta viridis (discretas)
-    cores = plt.cm.viridis(np.linspace(0, 1, len(pivot.columns)))
-    bottom = np.zeros(len(pivot))
-
-    for i, destino in enumerate(pivot.columns):
-        valores = pivot[destino].values
-        ax.barh(pivot.index, valores, left=bottom, label=destino, color=cores[i], edgecolor='none')
-        bottom += valores
-
-    # Configurar estética escura
-    ax.set_xlabel("Proporção da massa coletada", color='white')
-    ax.set_ylabel("Unidade da Federação", color='white')
-    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})\n(ordenado da UF com maior massa total para a menor)", color='white', fontsize=14)
-    ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left', facecolor='#0e1117', edgecolor='gray', labelcolor='white')
-    ax.grid(axis='x', linestyle='--', alpha=0.3, color='gray')
-    ax.tick_params(colors='white', axis='both')
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
-
-    # Ajustar cor dos spines
-    for spine in ax.spines.values():
-        spine.set_color('gray')
-
-    st.pyplot(fig)
-    st.caption("Gráfico de barras horizontais empilhadas – cada barra representa um estado (ordenado da maior massa total coletada para a menor). O comprimento de cada cor mostra a proporção (em massa) destinada àquele tipo de unidade. Fundo escuro para integração visual com o tema do aplicativo.")
-
 # ============================================================
 # 🏆 RANKING MUNICIPAL (antes dos orgânicos, com métricas adicionais)
 # ============================================================
@@ -623,14 +550,12 @@ if municipio == municipios[0]:
                 destinos = ", ".join(sorted(grupo[COL_DESTINO].unique()))
                 
                 grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
-                aterro_subset = grupo[grupo["MCF"] > 0]
-                massa_aterro_local = aterro_subset["MASSA_FLOAT_RANK"].sum()
+                massa_aterro_local = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
                 
                 receita_anual = 0.0
                 if massa_aterro_local > 0:
-                    # Cálculo do MCF médio ponderado (CORREÇÃO APLICADA)
-                    mcf_medio = (aterro_subset["MASSA_FLOAT_RANK"] * aterro_subset["MCF"]).sum() / massa_aterro_local
-                    co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, mcf_medio)
+                    # Usando o novo cálculo com lotes diários
+                    co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, 0.8)
                     co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_local)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
                     receita_anual = (evitado_20anos / ANOS_PROJECAO) * preco * cambio
