@@ -573,23 +573,34 @@ if municipio == municipios[0]:
 
     # Criar figura com fundo escuro
     fig, ax = plt.subplots(figsize=(12, 8))
-    fig.patch.set_facecolor('#0e1117')
-    ax.set_facecolor('#0e1117')
+    fig.patch.set_facecolor('#0e1117')  # fundo da figura escuro
+    ax.set_facecolor('#0e1117')         # fundo dos eixos escuro
 
-    # Cores da paleta viridis (discretas) – aplicadas na ordem da legenda
-    cores = plt.cm.viridis(np.linspace(0, 1, len(pivot.columns)))
+    # --- PALETA DE CORES MELHORADA (mais distintas e visíveis no fundo escuro) ---
+    # Utiliza a paleta 'tab10' para as primeiras 10 cores (fortes e saturadas)
+    # e 'tab20' para as demais, garantindo máximo contraste.
+    import matplotlib.colors as mcolors
+    cores_tab10 = plt.cm.tab10(np.linspace(0, 1, 10))
+    cores_tab20 = plt.cm.tab20(np.linspace(0, 1, 20))
+    # Combina as cores: primeiro as 10 da tab10, depois as restantes da tab20 se necessário
+    cores_combinadas = list(cores_tab10) + list(cores_tab20)
+    # Seleciona apenas as cores necessárias para o número de categorias
+    cores_finais = cores_combinadas[:len(pivot.columns)]
+
     bottom = np.zeros(len(pivot))
 
     for i, destino in enumerate(pivot.columns):
         valores = pivot[destino].values
-        ax.barh(pivot.index, valores, left=bottom, label=destino, color=cores[i], edgecolor='none')
+        ax.barh(pivot.index, valores, left=bottom, label=destino, color=cores_finais[i], edgecolor='none')
         bottom += valores
 
-    # Configurar estética escura
+    # Configurar estética escura com título garantido
     ax.set_xlabel("Proporção da massa coletada", color='white')
     ax.set_ylabel("Unidade da Federação", color='white')
-    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})\n(ordenado da UF com maior massa destinada a ATERRO SANITÁRIO para a menor)", color='white', fontsize=14)
-    ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left', facecolor='#0e1117', edgecolor='gray', labelcolor='white')
+    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})\n(ordenado da UF com maior massa destinada a ATERRO SANITÁRIO para a menor)", 
+                 color='white', fontsize=14, fontweight='bold')
+    ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left', 
+              facecolor='#0e1117', edgecolor='gray', labelcolor='white')
     ax.grid(axis='x', linestyle='--', alpha=0.3, color='gray')
     ax.tick_params(colors='white', axis='both')
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
