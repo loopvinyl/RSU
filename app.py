@@ -552,11 +552,10 @@ if municipio == municipios[0]:
         "Unidade de coprocessamento",
         "Outros"
     ]
-    # Reordenar as colunas do pivot conforme a ordem desejada (apenas as que existem)
     colunas_existentes = [col for col in ordem_legenda if col in pivot.columns]
     pivot = pivot[colunas_existentes]
 
-    # --- ORDENAÇÃO DAS UFs pela massa total de ATERRO SANITÁRIO (maior para menor) ---
+    # --- ORDENAÇÃO DAS UFs pela maior PROPORÇÃO (percentual) de ATERRO SANITÁRIO dentro de cada UF ---
     aterro_keywords = ["aterro sanitario", "aterro sanitário"]
     def is_aterro(destino):
         if pd.isna(destino):
@@ -564,27 +563,27 @@ if municipio == municipios[0]:
         dest_norm = normalizar_texto(destino)
         return any(kw in dest_norm for kw in aterro_keywords)
 
-    df_aterro = df_agg_graf[df_agg_graf[COL_DESTINO].apply(is_aterro)]
-    massa_aterro_por_uf = df_aterro.groupby(COL_UF)["MASSA_FLOAT"].sum().sort_values(ascending=False)
-    uf_order_aterro = massa_aterro_por_uf.index.tolist()
+    # Para cada UF, calcular a proporção de resíduos que vai para aterro sanitário
+    df_prop_aterro = df_agg_graf.groupby(COL_UF).apply(
+        lambda g: g[g[COL_DESTINO].apply(is_aterro)]["MASSA_FLOAT"].sum() / g["MASSA_FLOAT"].sum()
+    ).reset_index(name="prop_aterro")
+    df_prop_aterro = df_prop_aterro.fillna(0)
+    # Ordenar pela proporção de aterro (maior para menor)
+    uf_order_aterro_prop = df_prop_aterro.sort_values("prop_aterro", ascending=False)[COL_UF].tolist()
+
     todas_ufs = pivot.index.tolist()
-    uf_order = [uf for uf in uf_order_aterro if uf in todas_ufs] + [uf for uf in todas_ufs if uf not in uf_order_aterro]
+    uf_order = [uf for uf in uf_order_aterro_prop if uf in todas_ufs] + [uf for uf in todas_ufs if uf not in uf_order_aterro_prop]
     pivot = pivot.reindex(uf_order)
 
     # Criar figura com fundo escuro
     fig, ax = plt.subplots(figsize=(12, 8))
-    fig.patch.set_facecolor('#0e1117')  # fundo da figura escuro
-    ax.set_facecolor('#0e1117')         # fundo dos eixos escuro
+    fig.patch.set_facecolor('#0e1117')
+    ax.set_facecolor('#0e1117')
 
-    # --- PALETA DE CORES MELHORADA (mais distintas e visíveis no fundo escuro) ---
-    # Utiliza a paleta 'tab10' para as primeiras 10 cores (fortes e saturadas)
-    # e 'tab20' para as demais, garantindo máximo contraste.
-    import matplotlib.colors as mcolors
+    # Paleta de cores melhorada
     cores_tab10 = plt.cm.tab10(np.linspace(0, 1, 10))
     cores_tab20 = plt.cm.tab20(np.linspace(0, 1, 20))
-    # Combina as cores: primeiro as 10 da tab10, depois as restantes da tab20 se necessário
     cores_combinadas = list(cores_tab10) + list(cores_tab20)
-    # Seleciona apenas as cores necessárias para o número de categorias
     cores_finais = cores_combinadas[:len(pivot.columns)]
 
     bottom = np.zeros(len(pivot))
@@ -597,7 +596,7 @@ if municipio == municipios[0]:
     # Configurar estética escura com título garantido
     ax.set_xlabel("Proporção da massa coletada", color='white')
     ax.set_ylabel("Unidade da Federação", color='white')
-    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})\n(ordenado da UF com maior massa destinada a ATERRO SANITÁRIO para a menor)", 
+    ax.set_title(f"Destinação dos resíduos sólidos urbanos por UF ({ano_selecionado})\n(ordenado da UF com maior proporção destinada a ATERRO SANITÁRIO para a menor)", 
                  color='white', fontsize=14, fontweight='bold')
     ax.legend(title="Tipo de unidade de destino", bbox_to_anchor=(1.05, 1), loc='upper left', 
               facecolor='#0e1117', edgecolor='gray', labelcolor='white')
@@ -605,12 +604,11 @@ if municipio == municipios[0]:
     ax.tick_params(colors='white', axis='both')
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.0%}"))
 
-    # Ajustar cor dos spines
     for spine in ax.spines.values():
         spine.set_color('gray')
 
     st.pyplot(fig)
-    st.caption("Gráfico de barras horizontais empilhadas – ordenado pela quantidade de resíduos destinados a aterros sanitários (maior para menor). A legenda segue a ordem decrescente de participação nacional.")
+    st.caption("Gráfico de barras horizontais empilhadas – ordenado pela maior proporção (percentual) de resíduos destinados a aterros sanitários dentro de cada UF. A legenda segue a ordem decrescente de participação nacional.")
 
 # ============================================================
 # 🏆 RANKING MUNICIPAL (antes dos orgânicos, com métricas adicionais)
