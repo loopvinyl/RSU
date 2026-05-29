@@ -356,19 +356,24 @@ def load_data(ano):
 
 df = load_data(ano_selecionado)
 
-COL_CODIGO_ROTA = df.columns[16]
-COL_MUNICIPIO = df.columns[2]
-COL_TIPO_COLETA = df.columns[17]
-COL_MASSA = df.columns[24]
-COL_DESTINO = df.columns[28]
-COL_UF = df.columns[3]
+# =========================================================
+# Definição dos nomes das colunas (usando nomes fixos, mais robusto)
+# =========================================================
+COL_CODIGO_ROTA = "GTR1000"
+COL_MUNICIPIO = "Nom_Mun"
+COL_TIPO_COLETA = "GTR1001*"
+COL_MASSA = "GTR1008"
+COL_DESTINO = "GTR1011*"
+COL_UF = "UF"
 
+# Renomeia para nomes amigáveis
 df = df.rename(columns={
     COL_MUNICIPIO: "MUNICÍPIO",
     COL_TIPO_COLETA: "TIPO_COLETA_EXECUTADA",
     COL_MASSA: "MASSA_COLETADA"
 })
 
+# Atualiza os nomes das variáveis para usar os novos nomes
 COL_MUNICIPIO = "MUNICÍPIO"
 COL_TIPO_COLETA = "TIPO_COLETA_EXECUTADA"
 COL_MASSA = "MASSA_COLETADA"
@@ -550,12 +555,14 @@ if municipio == municipios[0]:
                 destinos = ", ".join(sorted(grupo[COL_DESTINO].unique()))
                 
                 grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
-                massa_aterro_local = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
+                aterro_subset = grupo[grupo["MCF"] > 0]
+                massa_aterro_local = aterro_subset["MASSA_FLOAT_RANK"].sum()
                 
                 receita_anual = 0.0
                 if massa_aterro_local > 0:
-                    # Usando o novo cálculo com lotes diários
-                    co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, 0.8)
+                    # MCF médio ponderado
+                    mcf_medio = (aterro_subset["MASSA_FLOAT_RANK"] * aterro_subset["MCF"]).sum() / massa_aterro_local
+                    co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, mcf_medio)
                     co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_local)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
                     receita_anual = (evitado_20anos / ANOS_PROJECAO) * preco * cambio
