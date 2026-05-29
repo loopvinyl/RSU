@@ -357,14 +357,14 @@ def load_data(ano):
 df = load_data(ano_selecionado)
 
 # =========================================================
-# Definição dos nomes das colunas (usando nomes fixos, mais robusto)
+# Definição dos índices das colunas (mesmo método original)
 # =========================================================
-COL_CODIGO_ROTA = "GTR1000"
-COL_MUNICIPIO = "Nom_Mun"
-COL_TIPO_COLETA = "GTR1001*"
-COL_MASSA = "GTR1008"
-COL_DESTINO = "GTR1011*"
-COL_UF = "UF"
+COL_CODIGO_ROTA = df.columns[16]
+COL_MUNICIPIO = df.columns[2]
+COL_TIPO_COLETA = df.columns[17]
+COL_MASSA = df.columns[24]
+COL_DESTINO = df.columns[28]
+COL_UF = df.columns[3]
 
 # Renomeia para nomes amigáveis
 df = df.rename(columns={
@@ -560,7 +560,7 @@ if municipio == municipios[0]:
                 
                 receita_anual = 0.0
                 if massa_aterro_local > 0:
-                    # MCF médio ponderado
+                    # Cálculo do MCF médio ponderado (CORREÇÃO APLICADA)
                     mcf_medio = (aterro_subset["MASSA_FLOAT_RANK"] * aterro_subset["MCF"]).sum() / massa_aterro_local
                     co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, mcf_medio)
                     co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_local)
