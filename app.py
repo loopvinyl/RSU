@@ -156,6 +156,35 @@ def classificar_tipo_aterro(mcf):
         return "Não Aterro"
 
 # =========================================================
+# NOVA FUNÇÃO: TRADUÇÃO PARA NOMENCLATURA UNFCCC (A6.4-AMT-003)
+# =========================================================
+def traduzir_para_unfccc(destino_snis):
+    """
+    Retorna string no formato: "SNIS (UNFCCC)"
+    Baseado na classificação do MCF e nas definições do A6.4-AMT-003.
+    """
+    if pd.isna(destino_snis):
+        return destino_snis
+    texto = normalizar_texto(destino_snis)
+    mcf = determinar_mcf_por_destino(destino_snis, 'organico')  # função definida mais abaixo
+    if "ATERRO SANITARIO" in texto:
+        if mcf >= 0.8:
+            unfccc = "Anaerobic managed SWDS"
+        else:
+            unfccc = "Managed poorly – semi-aerobic or active-aeration"
+    elif "ATERRO CONTROLADO" in texto:
+        unfccc = "Managed poorly – semi-aerobic (MCF=0.4)"
+    elif "LIXAO" in texto or "VAZADOURO" in texto:
+        unfccc = "Unmanaged SWDS – shallow (<5m) or stockpiles"
+    elif "COMPOSTAGEM" in texto or "VERMICOMPOSTAGEM" in texto:
+        unfccc = "Alternative treatment (composting/vermicomposting)"
+    elif "TRANSBORDO" in texto:
+        unfccc = "Transfer station (not final disposal)"
+    else:
+        unfccc = "Other / Not classified"
+    return f"{destino_snis} ({unfccc})"
+
+# =========================================================
 # PARÂMETROS GERAIS (tco2eq)
 # =========================================================
 GWP_CH4_20 = 79.7
@@ -438,7 +467,10 @@ tabela_destino["%"] = (tabela_destino["Massa (t)"] / massa_total) * 100 if massa
 tabela_destino["Massa (t)"] = tabela_destino["Massa (t)"].apply(formatar_numero_br)
 tabela_destino["%"] = tabela_destino["%"].apply(lambda x: formatar_numero_br(x, 1))
 
-st.dataframe(tabela_destino[["Código Rota", "Tipo de Coleta", "Tipo de Unidade (SNIS)", "Massa (t)", "%"]], use_container_width=True)
+# ADICIONAR COLUNA COM NOMENCLATURA UNFCCC
+tabela_destino["Tipo de Unidade (SNIS) + UNFCCC"] = tabela_destino["Tipo de Unidade (SNIS)"].apply(traduzir_para_unfccc)
+
+st.dataframe(tabela_destino[["Código Rota", "Tipo de Coleta", "Tipo de Unidade (SNIS) + UNFCCC", "Massa (t)", "%"]], use_container_width=True)
 st.caption("""
 📌 Os dados refletem fielmente os registros do SNIS. A coluna lista todos os tipos de unidade (intermediárias e finais). 
 Possíveis duplicidades (ex.: transbordo + aterro) decorrem de como o gestor preencheu as rotas.
@@ -467,8 +499,10 @@ if municipio == municipios[0]:
     agg_destino["Percentual (%)"] = (agg_destino["MASSA_FLOAT"] / massa_total_dist) * 100 if massa_total_dist > 0 else 0
     agg_destino["Massa (t)"] = agg_destino["MASSA_FLOAT"].apply(formatar_numero_br)
     agg_destino["Percentual (%)"] = agg_destino["Percentual (%)"].apply(lambda x: formatar_numero_br(x, 2))
+    # Adicionar coluna UNFCCC
+    agg_destino["Tipo de Unidade (SNIS) + UNFCCC"] = agg_destino[COL_DESTINO].apply(traduzir_para_unfccc)
     st.dataframe(
-        agg_destino.rename(columns={COL_DESTINO: "Tipo de Unidade (SNIS)"})[["Tipo de Unidade (SNIS)", "Massa (t)", "Percentual (%)"]],
+        agg_destino.rename(columns={COL_DESTINO: "Tipo de Unidade (SNIS)"})[["Tipo de Unidade (SNIS) + UNFCCC", "Massa (t)", "Percentual (%)"]],
         use_container_width=True
     )
     st.caption("Nota: a soma das massas pode exceder o total coletado devido a duplicidades nas rotas (ex.: transbordo e destino final).")
@@ -548,13 +582,14 @@ if municipio == municipios[0]:
             for (mun, uf), grupo in ranking_data.groupby([COL_MUNICIPIO, COL_UF]):
                 massa_total = grupo["MASSA_FLOAT_RANK"].sum()
                 destinos = ", ".join(sorted(grupo[COL_DESTINO].unique()))
+                # Traduzir cada destino para UNFCCC e juntar
+                destinos_unfccc = ", ".join([traduzir_para_unfccc(d) for d in sorted(grupo[COL_DESTINO].unique())])
                 
                 grupo["MCF"] = grupo[COL_DESTINO].apply(lambda x: determinar_mcf_por_destino(x, 'organico'))
                 massa_aterro_local = grupo[grupo["MCF"] > 0]["MASSA_FLOAT_RANK"].sum()
                 
                 receita_anual = 0.0
                 if massa_aterro_local > 0:
-                    # Usando o novo cálculo com lotes diários
                     co2eq_aterro = calcular_co2eq_aterro_20anos(massa_aterro_local, 0.8)
                     co2eq_vermi = calcular_co2eq_vermi_20anos(massa_aterro_local)
                     evitado_20anos = co2eq_aterro - co2eq_vermi
@@ -566,6 +601,7 @@ if municipio == municipios[0]:
                     "Massa Total (t/ano)": massa_total,
                     "Massa para Aterro (t/ano)": massa_aterro_local,
                     "Tipo(s) de Unidade (SNIS)": destinos,
+                    "Tipo(s) de Unidade (SNIS + UNFCCC)": destinos_unfccc,
                     "Receita Potencial (R$/ano)": receita_anual
                 })
 
@@ -620,8 +656,9 @@ if not df_organicos.empty:
 
     linhas = []
     for _, row in agg_org.iterrows():
+        destino_unfccc = traduzir_para_unfccc(row[COL_DESTINO])
         linhas.append({
-            "Destino": row[COL_DESTINO],
+            "Destino (SNIS + UNFCCC)": destino_unfccc,
             "Massa Anual (t)": formatar_numero_br(row["MASSA_FLOAT"], 2),
             "% do tipo": formatar_numero_br(row["% do tipo"], 2),
             "% do total no ano": formatar_numero_br(row["% do total no ano"], 4)
@@ -629,14 +666,14 @@ if not df_organicos.empty:
 
     perc_total_tipo = (total_organicos / massa_total_geral) * 100 if massa_total_geral > 0 else 0
     linhas.append({
-        "Destino": "Total do tipo",
+        "Destino (SNIS + UNFCCC)": "Total do tipo",
         "Massa Anual (t)": formatar_numero_br(total_organicos, 2),
         "% do tipo": "100,00%",
         "% do total no ano": formatar_numero_br(perc_total_tipo, 4)
     })
 
     linhas.append({
-        "Destino": "Total no ano",
+        "Destino (SNIS + UNFCCC)": "Total no ano",
         "Massa Anual (t)": formatar_numero_br(massa_total_geral, 2),
         "% do tipo": " - ",
         "% do total no ano": "100,00%"
@@ -653,8 +690,10 @@ if not df_organicos.empty:
     df_org_dest_view = df_org_dest.copy()
     df_org_dest_view["Massa (t)"] = df_org_dest_view["MASSA_FLOAT"].apply(formatar_numero_br)
     df_org_dest_view["%"] = df_org_dest_view["%"].apply(lambda x: formatar_numero_br(x, 1))
+    df_org_dest_view["Tipo de Unidade (SNIS)"] = df_org_dest_view[COL_DESTINO]
+    df_org_dest_view["Tipo de Unidade (SNIS + UNFCCC)"] = df_org_dest_view[COL_DESTINO].apply(traduzir_para_unfccc)
     st.dataframe(
-        df_org_dest_view.rename(columns={COL_DESTINO: "Tipo de Unidade (SNIS)"})[["Tipo de Unidade (SNIS)", "Massa (t)", "%"]],
+        df_org_dest_view[["Tipo de Unidade (SNIS + UNFCCC)", "Massa (t)", "%"]],
         use_container_width=True
     )
 
@@ -670,7 +709,7 @@ if not df_organicos.empty:
             co2eq_aterro_total += co2eq_aterro
             massa_aterro_total += massa_t
             resultados.append({
-                "Tipo de Unidade (SNIS)": row[COL_DESTINO],
+                "Tipo de Unidade (SNIS + UNFCCC)": traduzir_para_unfccc(row[COL_DESTINO]),
                 "Massa (t)": formatar_numero_br(massa_t),
                 "MCF": formatar_numero_br(mcf),
                 "CO₂e aterro (20 anos)": formatar_numero_br(co2eq_aterro)
@@ -772,8 +811,9 @@ if not df_podas.empty:
 
     linhas_podas = []
     for _, row in agg_podas.iterrows():
+        destino_unfccc = traduzir_para_unfccc(row[COL_DESTINO])
         linhas_podas.append({
-            "Destino": row[COL_DESTINO],
+            "Destino (SNIS + UNFCCC)": destino_unfccc,
             "Massa Anual (t)": formatar_numero_br(row["MASSA_FLOAT"], 2),
             "% do tipo": formatar_numero_br(row["% do tipo"], 2),
             "% do total no ano": formatar_numero_br(row["% do total no ano"], 4)
@@ -781,14 +821,14 @@ if not df_podas.empty:
 
     perc_total_tipo_podas = (total_podas / massa_total_geral_podas) * 100 if massa_total_geral_podas > 0 else 0
     linhas_podas.append({
-        "Destino": "Total do tipo",
+        "Destino (SNIS + UNFCCC)": "Total do tipo",
         "Massa Anual (t)": formatar_numero_br(total_podas, 2),
         "% do tipo": "100,00%",
         "% do total no ano": formatar_numero_br(perc_total_tipo_podas, 4)
     })
 
     linhas_podas.append({
-        "Destino": "Total no ano",
+        "Destino (SNIS + UNFCCC)": "Total no ano",
         "Massa Anual (t)": formatar_numero_br(massa_total_geral_podas, 2),
         "% do tipo": " - ",
         "% do total no ano": "100,00%"
