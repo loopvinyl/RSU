@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import requests
 
 # =========================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -48,23 +49,17 @@ def ler_aba(caminho, nome_aba):
     Lê uma aba do Excel, identificando a linha de cabeçalho.
     """
     try:
-        # Primeiro, ler sem cabeçalho para varrer as primeiras linhas
         df_raw = pd.read_excel(caminho, sheet_name=nome_aba, header=None)
-        # Identificar linha que contém "CÓDIGO DO IBGE" (ou similar)
         header_idx = None
         for i, row in df_raw.iterrows():
-            # Verifica se alguma célula da linha contém a string
             if row.astype(str).str.contains("CÓDIGO DO IBGE|RESPONDEU AO MÓDULO", case=False, na=False).any():
                 header_idx = i
                 break
         if header_idx is not None:
             df = pd.read_excel(caminho, sheet_name=nome_aba, header=header_idx)
         else:
-            # Fallback: usar a primeira linha que não seja toda vazia
             df = pd.read_excel(caminho, sheet_name=nome_aba, header=0)
-        # Remover linhas completamente vazias
         df = df.dropna(how="all")
-        # Remover colunas com todos os valores nulos
         df = df.dropna(axis=1, how="all")
         return df
     except Exception as e:
@@ -81,11 +76,9 @@ def carregar_dados(ano):
     df_col = ler_aba(caminho, "Manejo_Coleta_e_Destinação")
     return df_res, df_col
 
-# Carregar ambos os anos
 df_res_2023, df_col_2023 = carregar_dados(2023)
 df_res_2024, df_col_2024 = carregar_dados(2024)
 
-# Verificar se os dados foram carregados
 if df_res_2023 is None or df_res_2024 is None:
     st.error("❌ Não foi possível carregar os dados. Verifique os arquivos.")
     st.stop()
@@ -94,9 +87,6 @@ if df_res_2023 is None or df_res_2024 is None:
 # PRÉ-PROCESSAMENTO
 # =========================================================
 def padronizar_colunas(df):
-    """
-    Renomeia colunas comuns para facilitar a análise.
-    """
     if df is None:
         return df
     col_map = {}
@@ -137,25 +127,18 @@ def padronizar_colunas(df):
     return df
 
 def converter_numericas(df):
-    """
-    Converte colunas que devem ser numéricas para float, ignorando erros.
-    """
     if df is None:
         return df
     for col in df.columns:
-        # Pular colunas que são categóricas
         if col in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO", "NATUREZA JURÍDICA", "CNPJ"]:
             continue
-        # Se a coluna não for numérica, tenta converter
         if df[col].dtype == object:
             try:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-            except Exception as e:
-                # Se falhar, mantém como está
+            except:
                 pass
     return df
 
-# Aplicar padronização e conversão
 df_res_2023 = padronizar_colunas(df_res_2023)
 df_res_2023 = converter_numericas(df_res_2023)
 df_res_2024 = padronizar_colunas(df_res_2024)
@@ -172,7 +155,6 @@ df_col_2024 = converter_numericas(df_col_2024)
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔍 Filtros")
 
-# Selecionar ano base
 ano_base = st.sidebar.selectbox("Ano para análise detalhada", [2023, 2024], index=1)
 
 if ano_base == 2023:
@@ -182,7 +164,6 @@ else:
     df_res = df_res_2024
     df_col = df_col_2024
 
-# Filtros
 ufs = sorted(df_res["UF"].dropna().unique()) if "UF" in df_res.columns else []
 uf_selecionada = st.sidebar.selectbox("UF (opcional)", ["Todas"] + ufs)
 
@@ -345,7 +326,7 @@ with tab3:
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO
+# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO CORRIGIDO)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -377,22 +358,54 @@ with tab4:
                 )
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # Mapa coroplético
+        # ========== MAPA COROPLÉTICO COM GEOJSON ==========
         if "UF" in df_col_filt.columns and "MASSA_ROTA" in df_col_filt.columns:
             st.subheader("🗺️ Mapa da Massa Coletada por Estado")
             uf_mass = df_col_filt.groupby("UF")["MASSA_ROTA"].sum().reset_index()
-            fig_map = px.choropleth(
-                uf_mass,
-                locations="UF",
-                locationmode="Brazil-states",
-                color="MASSA_ROTA",
-                hover_name="UF",
-                title="Massa coletada por estado",
-                color_continuous_scale="Greens",
-                labels={"MASSA_ROTA": "Massa (t)"}
-            )
-            fig_map.update_layout(geo=dict(bgcolor="rgba(0,0,0,0)"))
-            st.plotly_chart(fig_map, use_container_width=True)
+            # Garantir que há dados
+            if uf_mass.empty:
+                st.warning("Sem dados para gerar o mapa.")
+            else:
+                try:
+                    # Baixar GeoJSON do Brasil
+                    geojson_url = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson"
+                    response = requests.get(geojson_url, timeout=10)
+                    response.raise_for_status()
+                    geojson_data = response.json()
+
+                    # Mapear siglas para IDs do GeoJSON (geralmente código IBGE)
+                    sigla_to_id = {}
+                    for feature in geojson_data['features']:
+                        props = feature['properties']
+                        sigla = props.get('sigla', '').upper()
+                        id_ = feature.get('id') or props.get('id')
+                        if sigla and id_:
+                            sigla_to_id[sigla] = id_
+
+                    uf_mass['id'] = uf_mass['UF'].map(sigla_to_id)
+                    uf_mass = uf_mass.dropna(subset=['id'])
+
+                    if uf_mass.empty:
+                        st.warning("Nenhum estado pôde ser mapeado. Exibindo gráfico de barras.")
+                        fig_bar = px.bar(uf_mass, x="UF", y="MASSA_ROTA", title="Massa coletada por estado")
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                    else:
+                        fig_map = px.choropleth(
+                            uf_mass,
+                            geojson=geojson_data,
+                            locations='id',
+                            color='MASSA_ROTA',
+                            hover_name='UF',
+                            title="Massa coletada por estado",
+                            color_continuous_scale="Greens",
+                            labels={"MASSA_ROTA": "Massa (t)"}
+                        )
+                        fig_map.update_geos(fitbounds="locations", visible=False)
+                        st.plotly_chart(fig_map, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Erro ao gerar o mapa: {e}. Exibindo gráfico de barras como alternativa.")
+                    fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa coletada por estado")
+                    st.plotly_chart(fig_bar, use_container_width=True)
 
 # =========================================================
 # TAB 5 - COMPARAÇÃO 2023 vs 2024
