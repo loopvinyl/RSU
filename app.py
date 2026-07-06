@@ -22,6 +22,39 @@ Utilize os filtros e gráficos interativos para entender a situação dos resíd
 """)
 
 # =========================================================
+# FUNÇÕES DE FORMATAÇÃO BRASILEIRA (PADRÃO)
+# =========================================================
+def formatar_numero_br(valor, casas_decimais=None):
+    """
+    Formata um número no padrão brasileiro:
+    - Ponto como separador de milhares
+    - Vírgula como separador decimal
+    Ex: 1234.56 -> 1.234,56
+    """
+    if pd.isna(valor) or valor is None:
+        return "N/A"
+    try:
+        valor = float(valor)
+        if casas_decimais is None:
+            # Auto detecta casas: se for inteiro, 0; senão 2
+            if valor == int(valor):
+                casas_decimais = 0
+            else:
+                casas_decimais = 2
+        # Formata com separador de milhar e decimal
+        if casas_decimais == 0:
+            return f"{valor:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        else:
+            formato = f"{{:,.{casas_decimais}f}}"
+            return formato.format(valor).replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return "N/A"
+
+def formatar_metric(valor, casas=None):
+    """Atalho para formatar números em métricas (cards) com padrão BR."""
+    return formatar_numero_br(valor, casas)
+
+# =========================================================
 # CARREGAMENTO DOS ARQUIVOS (LOCAL)
 # =========================================================
 ARQUIVO_2023 = "rsuBrasil_2023.xlsx"
@@ -221,7 +254,7 @@ with tab1:
     with col3:
         if "POP_TOTAL" in df_res_filt.columns:
             pop_total = df_res_filt["POP_TOTAL"].sum()
-            st.metric("População total", f"{pop_total:,.0f}".replace(",", "."))
+            st.metric("População total", formatar_metric(pop_total, 0))
 
     # Indicadores avançados
     if df_res_filt is not None and not df_res_filt.empty:
@@ -235,14 +268,14 @@ with tab1:
                 per_capita_ano = massa_total / pop_total
                 per_capita_dia = per_capita_ano / 365
                 col1, col2 = st.columns(2)
-                col1.metric("Geração per capita (kg/hab/ano)", f"{per_capita_ano:.2f}")
-                col2.metric("Geração per capita (kg/hab/dia)", f"{per_capita_dia:.3f}")
+                col1.metric("Geração per capita (kg/hab/ano)", formatar_metric(per_capita_ano, 2))
+                col2.metric("Geração per capita (kg/hab/dia)", formatar_metric(per_capita_dia, 3))
 
         if "MASSA_SELETIVA" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
             massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
             if massa_total > 0:
                 taxa_cobertura = (massa_seletiva / massa_total) * 100
-                st.metric("Taxa de coleta seletiva (%)", f"{taxa_cobertura:.2f}%")
+                st.metric("Taxa de coleta seletiva (%)", formatar_metric(taxa_cobertura, 2))
 
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
             df_rank = df_res_filt.dropna(subset=["MASSA_TOTAL_RSU"])
@@ -253,12 +286,12 @@ with tab1:
                 col1.metric(
                     "🏆 Maior massa",
                     f"{maior['MUNICIPIO']} ({maior['UF']})",
-                    f"{maior['MASSA_TOTAL_RSU']:,.0f} t".replace(",", ".")
+                    f"{formatar_metric(maior['MASSA_TOTAL_RSU'], 0)} t"
                 )
                 col2.metric(
                     "📉 Menor massa",
                     f"{menor['MUNICIPIO']} ({menor['UF']})",
-                    f"{menor['MASSA_TOTAL_RSU']:,.0f} t".replace(",", ".")
+                    f"{formatar_metric(menor['MASSA_TOTAL_RSU'], 0)} t"
                 )
 
     st.markdown("---")
@@ -269,6 +302,8 @@ with tab1:
         fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
                         color="Quantidade", color_continuous_scale="Blues", height=500)
         fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
+        # Formatação brasileira no eixo Y
+        fig_uf.update_yaxis(tickformat=',.0f')
         st.plotly_chart(fig_uf, use_container_width=True)
 
     if "POP_TOTAL" in df_res_filt.columns:
@@ -276,6 +311,7 @@ with tab1:
                                title="Distribuição da população dos municípios",
                                labels={"POP_TOTAL": "População"},
                                color_discrete_sequence=["#2E86C1"], height=500)
+        fig_pop.update_xaxis(tickformat=',.0f')
         st.plotly_chart(fig_pop, use_container_width=True)
 
     if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
@@ -285,6 +321,7 @@ with tab1:
                            labels={"MASSA_TOTAL_RSU": "Massa (t)"},
                            color="MASSA_TOTAL_RSU", color_continuous_scale="Greens", height=500)
         fig_massa.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
+        fig_massa.update_yaxis(tickformat=',.0f')
         st.plotly_chart(fig_massa, use_container_width=True)
 
 # =========================================================
@@ -303,7 +340,7 @@ with tab2:
             df_tab = df_res_filt[cols_para_exibir].copy()
             for col in df_tab.columns:
                 if col not in ["MUNICIPIO", "UF", "MACRO"]:
-                    df_tab[col] = df_tab[col].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
+                    df_tab[col] = df_tab[col].apply(lambda x: formatar_metric(x, 0) if pd.notna(x) else "")
             st.dataframe(df_tab, use_container_width=True, height=400, hide_index=True)
 
         if "POP_TOTAL" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
@@ -312,6 +349,8 @@ with tab2:
                                      title="Relação População vs Massa de RSU",
                                      labels={"POP_TOTAL": "População", "MASSA_TOTAL_RSU": "Massa (t)"},
                                      color="UF" if "UF" in df_res_filt.columns else None, height=500)
+            fig_scatter.update_xaxis(tickformat=',.0f')
+            fig_scatter.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_scatter, use_container_width=True)
 
 # =========================================================
@@ -323,7 +362,7 @@ with tab3:
         col1, col2, col3 = st.columns(3)
         col1.metric("Total de rotas", df_col_filt.shape[0])
         if "MASSA_ROTA" in df_col_filt.columns:
-            col2.metric("Massa total nas rotas", f"{df_col_filt['MASSA_ROTA'].sum():,.0f} t".replace(",", "."))
+            col2.metric("Massa total nas rotas", f"{formatar_metric(df_col_filt['MASSA_ROTA'].sum(), 0)} t")
         if "TIPO_COLETA" in df_col_filt.columns:
             col3.metric("Tipos de coleta distintos", df_col_filt["TIPO_COLETA"].nunique())
 
@@ -333,17 +372,24 @@ with tab3:
             fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
                               color="Quantidade", color_continuous_scale="Viridis", height=500)
             fig_freq.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
+            fig_freq.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_freq, use_container_width=True)
 
         if "MASSA_ROTA" in df_col_filt.columns and "TIPO_COLETA" in df_col_filt.columns:
             mass_tipo = df_col_filt.groupby("TIPO_COLETA")["MASSA_ROTA"].sum().reset_index()
             mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
+            # No gráfico de pizza, os valores aparecem no hover, já formatados pelo Plotly (ponto decimal)
+            # Mas podemos personalizar o texto do hover com formato BR? Não é necessário, pois é interativo.
             fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
                              title="Massa coletada por tipo de coleta", hole=0.4, height=500)
             st.plotly_chart(fig_pie, use_container_width=True)
 
         st.subheader("🔍 Amostra das rotas")
-        st.dataframe(df_col_filt.head(100), use_container_width=True, height=300, hide_index=True)
+        df_amostra = df_col_filt.head(100).copy()
+        for col in df_amostra.columns:
+            if col not in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO"]:
+                df_amostra[col] = df_amostra[col].apply(lambda x: formatar_metric(x, 0) if pd.notna(x) and isinstance(x, (int, float)) else x)
+        st.dataframe(df_amostra, use_container_width=True, height=300, hide_index=True)
 
 # =========================================================
 # TAB 4 - DESTINAÇÃO (COM FILTRO DE TRANSBORDO)
@@ -351,22 +397,18 @@ with tab3:
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
     
-    # Checkbox para excluir transbordos (padrão: ativo)
     excluir_transbordo = st.checkbox(
         "Excluir rotas de transbordo da análise (recomendado para evitar dupla contagem)", 
         value=True
     )
 
-    # Aplica o filtro se o checkbox estiver marcado
     df_destino = df_col_filt.copy()
     if excluir_transbordo:
         if "TIPO_DESTINO" in df_destino.columns:
-            # Normaliza a coluna de destino
             df_destino['destino_norm'] = df_destino['TIPO_DESTINO'].astype(str).apply(
                 lambda x: unicodedata.normalize('NFKD', x).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
                 if pd.notna(x) else ''
             )
-            # Remove linhas com "TRANSBORDO"
             df_destino = df_destino[~df_destino['destino_norm'].str.contains('TRANSBORDO', na=False)]
             df_destino = df_destino.drop(columns=['destino_norm'])
         else:
@@ -384,6 +426,7 @@ with tab4:
                                   labels={"MASSA_ROTA": "Massa (t)"},
                                   color="MASSA_ROTA", color_continuous_scale="Viridis", height=500)
                 fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
+                fig_dest.update_yaxis(tickformat=',.0f')
                 st.plotly_chart(fig_dest, use_container_width=True)
             else:
                 fig_dest = px.pie(destinos, values="Quantidade", names="Destino",
@@ -421,6 +464,7 @@ with tab4:
                     height=500
                 )
                 fig_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+                fig_bar.update_yaxis(tickformat=',.0f')
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Todos os valores de massa são zero ou nulos. Não há dados para exibir.")
@@ -451,7 +495,7 @@ with tab5:
     
     if not np.isnan(massas["2023"]) and not np.isnan(massas["2024"]) and massas["2023"] > 0:
         var_massa = ((massas["2024"] - massas["2023"]) / massas["2023"]) * 100
-        st.metric("Variação da massa total", f"{var_massa:+.2f}%")
+        st.metric("Variação da massa total", f"{formatar_metric(var_massa, 2)}%")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -461,6 +505,7 @@ with tab5:
                            color=list(massas.keys()),
                            color_discrete_sequence=["#1f77b4", "#ff7f0e"],
                            height=500)
+        fig_massa.update_yaxis(tickformat=',.0f')
         st.plotly_chart(fig_massa, use_container_width=True)
 
     with col2:
@@ -470,6 +515,7 @@ with tab5:
                          color=list(pops.keys()),
                          color_discrete_sequence=["#2ca02c", "#d62728"],
                          height=500)
+        fig_pop.update_yaxis(tickformat=',.0f')
         st.plotly_chart(fig_pop, use_container_width=True)
     
     if "TIPO_COLETA" in df_col_2023.columns and "TIPO_COLETA" in df_col_2024.columns:
@@ -484,6 +530,7 @@ with tab5:
         fig_comp.add_trace(go.Bar(x=freq_comp["Tipo"], y=freq_comp["2024"], name="2024", marker_color="#ff7f0e"))
         fig_comp.update_layout(title="Comparação de tipos de coleta", xaxis_tickangle=45, barmode="group",
                                height=500, margin=dict(l=20, r=20, t=40, b=20))
+        fig_comp.update_yaxis(tickformat=',.0f')
         st.plotly_chart(fig_comp, use_container_width=True)
 
 # =========================================================
