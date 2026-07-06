@@ -4,7 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import os
-import requests  # necessário para baixar o GeoJSON
+import requests
 
 # =========================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -298,7 +298,7 @@ with tab3:
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO USANDO GEOJSON)
+# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO - ESCALA DE CORES AJUSTADA)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -320,11 +320,11 @@ with tab4:
                                   title="Distribuição dos tipos de destino (contagem de rotas)")
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # ========== MAPA COROPLÉTICO COM GEOJSON ==========
+        # ========== MAPA COROPLÉTICO COM ESCALA DE CORES AJUSTADA ==========
         if "UF" in df_col_filt.columns:
             st.subheader("🗺️ Mapa da Massa Coletada por Estado")
             
-            # Tenta usar MASSA_ROTA
+            # Tentar obter dados de MASSA_ROTA
             if "MASSA_ROTA" in df_col_filt.columns:
                 uf_mass = df_col_filt.groupby("UF")["MASSA_ROTA"].sum().reset_index()
             else:
@@ -351,19 +351,29 @@ with tab4:
                         response.raise_for_status()
                         geojson_data = response.json()
                         
-                        # Mapear siglas para IDs (código IBGE)
+                        # Mapear siglas para IDs
                         sigla_to_id = {}
                         for feature in geojson_data['features']:
                             props = feature['properties']
                             sigla = props.get('sigla', '').upper()
                             id_ = feature.get('id') or props.get('id')
                             if sigla and id_:
-                                sigla_to_id[sigla] = str(id_)  # garantir string
+                                sigla_to_id[sigla] = str(id_)
                         
                         uf_mass['id'] = uf_mass['UF'].map(sigla_to_id)
                         uf_mass = uf_mass.dropna(subset=['id'])
                         
                         if not uf_mass.empty:
+                            # --- AJUSTE DA ESCALA DE CORES ---
+                            # Calcular percentis para definir o range_color
+                            mass_vals = uf_mass["MASSA_ROTA"]
+                            # Usa percentil 95 como máximo para evitar distorção por outliers
+                            max_val = mass_vals.quantile(0.95) if len(mass_vals) > 1 else mass_vals.max()
+                            min_val = 0  # mínimo fixo em 0
+                            
+                            # Paleta com bom contraste (pode trocar para "Reds", "YlOrRd", "Blues", "Greens")
+                            color_scale = "Reds"
+                            
                             fig_map = px.choropleth(
                                 uf_mass,
                                 geojson=geojson_data,
@@ -371,13 +381,14 @@ with tab4:
                                 color='MASSA_ROTA',
                                 hover_name='UF',
                                 title="Massa coletada por estado",
-                                color_continuous_scale="Greens",
+                                color_continuous_scale=color_scale,
+                                range_color=(min_val, max_val),  # LIMITA O RANGE PARA MELHOR CONTRASTE
                                 labels={"MASSA_ROTA": "Massa (t)"}
                             )
                             fig_map.update_geos(fitbounds="locations", visible=False)
                             st.plotly_chart(fig_map, use_container_width=True)
                         else:
-                            st.warning("Não foi possível mapear as siglas para os códigos do GeoJSON. Exibindo gráfico de barras.")
+                            st.warning("Não foi possível mapear as siglas para os IDs do GeoJSON. Exibindo gráfico de barras.")
                             fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
                             st.plotly_chart(fig_bar, use_container_width=True)
                     except Exception as e:
