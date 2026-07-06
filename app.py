@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 import unicodedata
 import requests
-import os
-from bs4 import BeautifulSoup
 import re
 from scipy.signal import fftconvolve
 from datetime import datetime, timedelta
@@ -12,9 +10,12 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import FuncFormatter
 import yfinance as yf
-
-# ========== IMPORTAÇÃO DA IA ==========
-from utils.ia_classificacao import ClassificadorDestinoIA, classificar_destino_regra, normalizar_texto
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import io
+import os
 
 # ========== CONFIGURAÇÃO DA PÁGINA ==========
 st.set_page_config(
@@ -41,11 +42,11 @@ ano_selecionado = st.selectbox(
 )
 
 # =========================================================
-# URLs atualizadas para apontar para os dados dentro do seu repositório
+# ARQUIVOS LOCAIS (dentro do mesmo diretório do app)
 # =========================================================
 URLS_POR_ANO = {
-    "2023": "https://raw.githubusercontent.com/loopvinyl/composta-ia/main/data/rsuBrasil_2023.xlsx",
-    "2024": "https://raw.githubusercontent.com/loopvinyl/composta-ia/main/data/rsuBrasil_2024.xlsx"
+    "2023": "rsuBrasil_2023.xlsx",
+    "2024": "rsuBrasil_2024.xlsx"
 }
 
 # =========================================================
@@ -146,6 +147,13 @@ def formatar_eixo_abreviado(x, pos):
     if abs(x) >= 1e3:
         return f"{x/1e3:.1f} k"
     return f"{x:.0f}"
+
+def normalizar_texto(txt):
+    if pd.isna(txt):
+        return ""
+    txt = unicodedata.normalize("NFKD", str(txt))
+    txt = txt.encode("ASCII", "ignore").decode("utf-8")
+    return txt.upper().strip()
 
 # =========================================================
 # PARÂMETROS UNFCCC A6.4-AMT-003-v01.0 (2025) – Application B (Tropical Wet)
@@ -350,18 +358,195 @@ def plot_simulacao_compostagem(df_sim):
     return fig
 
 # =========================================================
-# CARREGAMENTO E PREPARAÇÃO DOS DADOS
+# IA: CLASSIFICAÇÃO DE DESTINOS (PLN)
+# =========================================================
+class ClassificadorDestinoIA:
+    def __init__(self):
+        self.pipeline = None
+        self.vectorizer = None
+        self.classifier = None
+        self.classes_ = None
+    
+    def treinar_com_dados_snis(self, df, col_texto):
+        """Treina o modelo com os dados do SNIS."""
+        textos = df[col_texto].dropna().astype(str).tolist()
+        # Gera rótulos baseados em regras para treino supervisionado
+        labels = []
+        for txt in textos:
+            label = self._classificar_regra(txt)
+            labels.append(label)
+        # Filtra apenas textos com rótulos definidos
+        df_temp = pd.DataFrame({'texto': textos, 'label': labels})
+        df_temp = df_temp[df_temp['label'] != 'Indefinido']
+        if len(df_temp) < 2:
+            # Fallback: classes manuais
+            self.classes_ = ['Aterro Sanitário', 'Compostagem', 'Reciclagem', 'Transbordo', 'Indefinido']
+            self.vectorizer = TfidfVectorizer(max_features=100)
+            X = self.vectorizer.fit_transform(['aterro', 'compostagem', 'reciclagem', 'transbordo', 'indefinido'])
+            y = self.classes_
+            self.classifier = LogisticRegression(max_iter=1000)
+            self.classifier.fit(X, y)
+            self.pipeline = self
+            return
+        self.vectorizer = TfidfVectorizer(max_features=1000, ngram_range=(1,2))
+        X = self.vectorizer.fit_transform(df_temp['texto'])
+        y = df_temp['label']
+        self.classifier = LogisticRegression(max_iter=1000)
+        self.classifier.fit(X, y)
+        self.classes_ = self.classifier.classes_
+        self.pipeline = self
+    
+    def _classificar_regra(self, texto):
+        texto_norm = normalizar_texto(texto)
+        if 'ATERRO' in texto_norm:
+            return 'Aterro Sanitário'
+        elif 'COMPOSTAGEM' in texto_norm:
+            return 'Compostagem'
+        elif 'RECICLAGEM' in texto_norm or 'SEPARAÇÃO' in texto_norm:
+            return 'Reciclagem'
+        elif 'TRANSBORDO' in texto_norm:
+            return 'Transbordo'
+        else:
+            return 'Indefinido'
+    
+    def prever(self, texto, threshold=0.3):
+        if pd.isna(texto) or texto == '':
+            return 'Indefinido'
+        texto_norm = normalizar_texto(texto)
+        # Fallback por regra se não houver modelo
+        if self.pipeline is None:
+            return self._classificar_regra(texto)
+        try:
+            X = self.vectorizer.transform([texto_norm])
+            probs = self.classifier.predict_proba(X)[0]
+            max_prob = max(probs)
+            if max_prob < threshold:
+                return self._classificar_regra(texto)
+            idx = np.argmax(probs)
+            return self.classes_[idx]
+        except:
+            return self._classificar_regra(texto)
+    
+    def carregar_ou_treinar(self, df, col_texto):
+        """Tenta carregar modelo salvo, senão treina."""
+        # Para simplificar, sempre treina com os dados atuais
+        self.treinar_com_dados_snis(df, col_texto)
+
+# =========================================================
+# FUNÇÕES DE CLUSTERIZAÇÃO
+# =========================================================
+def preparar_dados_clusterizacao(df):
+    """Prepara dados para clusterização."""
+    # Agrupa por município
+    df_mun = df.groupby('MUNICÍPIO').agg({
+        'MASSA_COLETADA': 'sum',
+        'UF': 'first'
+    }).reset_index()
+    # Adiciona colunas de destino agregadas
+    destinos = df.groupby('MUNICÍPIO')[COL_DESTINO].apply(lambda x: ' '.join(x.dropna().astype(str))).reset_index()
+    destinos.columns = ['MUNICÍPIO', 'destinos']
+    df_mun = pd.merge(df_mun, destinos, on='MUNICÍPIO')
+    # Cria features numéricas: massa, número de rotas, etc.
+    rotas = df.groupby('MUNICÍPIO').size().reset_index(name='num_rotas')
+    df_mun = pd.merge(df_mun, rotas, on='MUNICÍPIO')
+    # Percentual de aterro
+    df_aterro = df[df['MCF'] > 0].groupby('MUNICÍPIO')['MASSA_COLETADA'].sum().reset_index()
+    df_aterro.rename(columns={'MASSA_COLETADA': 'massa_aterro'}, inplace=True)
+    df_mun = pd.merge(df_mun, df_aterro, on='MUNICÍPIO', how='left').fillna(0)
+    df_mun['pct_aterro'] = (df_mun['massa_aterro'] / df_mun['MASSA_COLETADA']) * 100
+    # Percentual de compostagem
+    df_compost = df[df[COL_DESTINO].str.contains('COMPOSTAGEM', case=False, na=False)].groupby('MUNICÍPIO')['MASSA_COLETADA'].sum().reset_index()
+    df_compost.rename(columns={'MASSA_COLETADA': 'massa_compost'}, inplace=True)
+    df_mun = pd.merge(df_mun, df_compost, on='MUNICÍPIO', how='left').fillna(0)
+    df_mun['pct_compost'] = (df_mun['massa_compost'] / df_mun['MASSA_COLETADA']) * 100
+    # Seleciona features
+    features = df_mun[['MASSA_COLETADA', 'num_rotas', 'pct_aterro', 'pct_compost']].fillna(0)
+    return features, df_mun
+
+def clusterizar_municipios(X, n_clusters=4):
+    """Aplica K-Means."""
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(X_scaled)
+    return labels, kmeans, scaler
+
+def aplicar_pca(X):
+    """Aplica PCA para visualização 2D."""
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_scaled)
+    return X_pca, pca
+
+def plot_clusters(X_pca, labels, df_cluster):
+    """Plot dos clusters."""
+    fig, ax = plt.subplots(figsize=(10, 8))
+    scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', alpha=0.8, s=50)
+    ax.set_xlabel('Componente Principal 1')
+    ax.set_ylabel('Componente Principal 2')
+    ax.set_title('Clusterização de Municípios por Perfil de Resíduos')
+    # Adiciona anotações para alguns municípios
+    for i, row in df_cluster.iterrows():
+        if i % 10 == 0:  # Anota a cada 10 para não poluir
+            ax.annotate(row['MUNICÍPIO'][:10], (X_pca[i, 0], X_pca[i, 1]), fontsize=8, alpha=0.7)
+    plt.colorbar(scatter, label='Cluster')
+    plt.tight_layout()
+    return fig
+
+def resumo_clusters(df_cluster, labels):
+    """Gera resumo dos clusters."""
+    df_cluster['Cluster'] = labels
+    resumo = df_cluster.groupby('Cluster').agg({
+        'MASSA_COLETADA': ['mean', 'median', 'sum'],
+        'num_rotas': 'mean',
+        'pct_aterro': 'mean',
+        'pct_compost': 'mean'
+    }).round(2)
+    resumo.columns = ['Massa_Media', 'Massa_Mediana', 'Massa_Total_Cluster', 'Rotas_Media', 'Pct_Aterro_Media', 'Pct_Compost_Media']
+    resumo['Num_Municipios'] = df_cluster.groupby('Cluster').size()
+    return resumo
+
+def descrever_clusters(df_cluster, labels):
+    """Descreve cada cluster."""
+    df_cluster['Cluster'] = labels
+    descricoes = {}
+    for cluster in sorted(df_cluster['Cluster'].unique()):
+        sub = df_cluster[df_cluster['Cluster'] == cluster]
+        desc = f"""
+        **Municípios no cluster {cluster+1}:** {len(sub)}  
+        **Massa total de resíduos:** {formatar_br(sub['MASSA_COLETADA'].sum(), auto_precision=False, casas_override=0)} t  
+        **Média de massa por município:** {formatar_br(sub['MASSA_COLETADA'].mean(), auto_precision=False, casas_override=0)} t  
+        **Percentual médio de aterro:** {formatar_br(sub['pct_aterro'].mean(), auto_precision=False, casas_override=2)}%  
+        **Percentual médio de compostagem:** {formatar_br(sub['pct_compost'].mean(), auto_precision=False, casas_override=2)}%  
+        **Média de rotas de coleta:** {formatar_br(sub['num_rotas'].mean(), auto_precision=False, casas_override=1)}  
+        """
+        descricoes[cluster] = desc
+    return descricoes
+
+from sklearn.preprocessing import StandardScaler
+
+# =========================================================
+# CARREGAMENTO E PREPARAÇÃO DOS DADOS (LOCAL)
 # =========================================================
 @st.cache_data
 def load_data(ano):
-    url = URLS_POR_ANO[ano]
-    df = pd.read_excel(url, sheet_name="Manejo_Coleta_e_Destinação", header=12)
-    df = df.dropna(how="all")
-    df.columns = [str(col).strip() for col in df.columns]
-    return df
+    caminho = URLS_POR_ANO[ano]
+    try:
+        df = pd.read_excel(caminho, sheet_name="Manejo_Coleta_e_Destinação", header=12)
+        df = df.dropna(how="all")
+        df.columns = [str(col).strip() for col in df.columns]
+        return df
+    except FileNotFoundError:
+        st.error(f"❌ Arquivo não encontrado: {caminho}. Verifique se o arquivo existe no diretório do app.")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ Erro ao ler o arquivo: {e}")
+        st.stop()
 
 df = load_data(ano_selecionado)
 
+# Identificação das colunas
 COL_CODIGO_ROTA = df.columns[16]
 COL_MUNICIPIO = df.columns[2]
 COL_TIPO_COLETA = df.columns[17]
@@ -869,21 +1054,25 @@ with tab_ia:
     
     dados_comparacao = []
     for texto in amostras:
-        classe_regra = classificar_destino_regra(texto)
+        classe_regra = determinar_mcf_por_destino(texto)  # regra simples
         classe_ia = classificador_ia.prever(texto, threshold=0.3)
+        # Confiança (se disponível)
         if classificador_ia.pipeline is not None:
             texto_norm = normalizar_texto(texto)
-            probs = classificador_ia.pipeline.predict_proba([texto_norm])[0]
-            confianca = max(probs) * 100
+            try:
+                probs = classificador_ia.classifier.predict_proba(classificador_ia.vectorizer.transform([texto_norm]))[0]
+                confianca = max(probs) * 100
+            except:
+                confianca = 0.0
         else:
             confianca = 0.0
         
         dados_comparacao.append({
             "Texto Original": texto[:50] + "..." if len(texto) > 50 else texto,
-            "Regra (Manual)": classe_regra,
+            "Regra (Manual)": "Aterro" if classe_regra > 0 else "Não Aterro",
             "IA (Predição)": classe_ia,
-            "Confiança da IA": f"{confianca:.1f}%",
-            "Correção?": "✅" if classe_regra != classe_ia else "➖"
+            "Confiança da IA": f"{confianca:.1f}%" if confianca > 0 else "N/A",
+            "Correção?": "✅" if (classe_regra > 0 and classe_ia == "Aterro Sanitário") or (classe_regra == 0 and classe_ia != "Aterro Sanitário") else "➖"
         })
     
     df_comparacao = pd.DataFrame(dados_comparacao)
@@ -944,18 +1133,12 @@ with tab_ia:
     if st.button("🔍 Executar Clusterização"):
         with st.spinner("Agrupando municípios por similaridade..."):
             try:
-                from utils.ia_clustering import (
-                    preparar_dados_clusterizacao,
-                    clusterizar_municipios,
-                    aplicar_pca,
-                    plot_clusters,
-                    resumo_clusters,
-                    descrever_clusters
-                )
+                # Adiciona a coluna MCF para a clusterização
+                df_clean['MCF'] = df_clean[COL_DESTINO].apply(determinar_mcf_por_destino)
                 
                 X, df_cluster = preparar_dados_clusterizacao(df_clean)
-                if X.empty:
-                    st.warning("Dados insuficientes para clusterização.")
+                if X.empty or len(X) < 3:
+                    st.warning("Dados insuficientes para clusterização (poucos municípios com dados completos).")
                 else:
                     n_clusters = st.slider("Número de clusters:", 2, 6, 4)
                     labels, kmeans, scaler = clusterizar_municipios(X, n_clusters=n_clusters)
@@ -973,7 +1156,7 @@ with tab_ia:
                         'Massa_Total_Cluster': '{:.0f}',
                         'Rotas_Media': '{:.1f}',
                         'Pct_Aterro_Media': '{:.1f}',
-                        'Pct_Compostagem_Media': '{:.1f}'
+                        'Pct_Compost_Media': '{:.1f}'
                     }))
                     
                     st.subheader("📝 Perfil de cada Cluster")
@@ -985,14 +1168,14 @@ with tab_ia:
                     st.subheader("📍 Municípios por Cluster")
                     for cluster in sorted(df_cluster['Cluster'].unique()):
                         with st.expander(f"Cluster {cluster+1}"):
-                            municipios_cluster = df_cluster[df_cluster['Cluster'] == cluster][['MUNICÍPIO', 'UF', 'Massa_Total']]
-                            municipios_cluster = municipios_cluster.sort_values('Massa_Total', ascending=False)
+                            municipios_cluster = df_cluster[df_cluster['Cluster'] == cluster][['MUNICÍPIO', 'UF', 'MASSA_COLETADA']]
+                            municipios_cluster = municipios_cluster.sort_values('MASSA_COLETADA', ascending=False)
                             st.dataframe(municipios_cluster.style.format({
-                                'Massa_Total': '{:.0f}'
+                                'MASSA_COLETADA': '{:.0f}'
                             }), use_container_width=True)
             except Exception as e:
                 st.error(f"Erro na clusterização: {e}")
-                st.info("ℹ️ Verifique se o arquivo `utils/ia_clustering.py` está atualizado.")
+                st.info("ℹ️ Verifique se há dados suficientes para clusterização (mínimo de 3 municípios com dados completos).")
     
     # =========================================================
     # SEÇÃO 1: PREVISÃO DE GERAÇÃO PER CAPITA
