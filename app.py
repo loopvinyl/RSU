@@ -291,7 +291,7 @@ with tab1:
         uf_counts.columns = ["UF", "Quantidade"]
         fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
                         color="Quantidade", color_continuous_scale="Blues", height=500)
-        if fig_uf:
+        if fig_uf is not None:
             fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             fig_uf.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_uf, use_container_width=True)
@@ -301,7 +301,7 @@ with tab1:
                                title="Distribuição da população dos municípios",
                                labels={"POP_TOTAL": "População"},
                                color_discrete_sequence=["#2E86C1"], height=500)
-        if fig_pop:
+        if fig_pop is not None:
             fig_pop.update_xaxis(tickformat=',.0f')
             st.plotly_chart(fig_pop, use_container_width=True)
 
@@ -311,7 +311,7 @@ with tab1:
         fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
                            labels={"MASSA_TOTAL_RSU": "Massa (t)"},
                            color="MASSA_TOTAL_RSU", color_continuous_scale="Greens", height=500)
-        if fig_massa:
+        if fig_massa is not None:
             fig_massa.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             fig_massa.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_massa, use_container_width=True)
@@ -341,7 +341,7 @@ with tab2:
                                      title="Relação População vs Massa de RSU",
                                      labels={"POP_TOTAL": "População", "MASSA_TOTAL_RSU": "Massa (t)"},
                                      color="UF" if "UF" in df_res_filt.columns else None, height=500)
-            if fig_scatter:
+            if fig_scatter is not None:
                 fig_scatter.update_xaxis(tickformat=',.0f')
                 fig_scatter.update_yaxis(tickformat=',.0f')
                 st.plotly_chart(fig_scatter, use_container_width=True)
@@ -364,7 +364,7 @@ with tab3:
             freq.columns = ["Tipo", "Quantidade"]
             fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
                               color="Quantidade", color_continuous_scale="Viridis", height=500)
-            if fig_freq:
+            if fig_freq is not None:
                 fig_freq.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                 fig_freq.update_yaxis(tickformat=',.0f')
                 st.plotly_chart(fig_freq, use_container_width=True)
@@ -374,7 +374,7 @@ with tab3:
             mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
             fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
                              title="Massa coletada por tipo de coleta", hole=0.4, height=500)
-            if fig_pie:
+            if fig_pie is not None:
                 st.plotly_chart(fig_pie, use_container_width=True)
 
         st.subheader("🔍 Amostra das rotas")
@@ -418,14 +418,14 @@ with tab4:
                                   title="Massa destinada por tipo (dados de coleta)",
                                   labels={"MASSA_ROTA": "Massa (t)"},
                                   color="MASSA_ROTA", color_continuous_scale="Viridis", height=500)
-                if fig_dest:
+                if fig_dest is not None:
                     fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                     fig_dest.update_yaxis(tickformat=',.0f')
                     st.plotly_chart(fig_dest, use_container_width=True)
             else:
                 fig_dest = px.pie(destinos, values="Quantidade", names="Destino",
                                   title="Distribuição dos tipos de destino (contagem de rotas)", height=500)
-                if fig_dest:
+                if fig_dest is not None:
                     st.plotly_chart(fig_dest, use_container_width=True)
 
         # Distribuição por Estado
@@ -458,7 +458,7 @@ with tab4:
                     color_continuous_scale="Viridis",
                     height=500
                 )
-                if fig_bar:
+                if fig_bar is not None:
                     fig_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20))
                     fig_bar.update_yaxis(tickformat=',.0f')
                     st.plotly_chart(fig_bar, use_container_width=True)
@@ -501,7 +501,7 @@ with tab5:
                            color=list(massas.keys()),
                            color_discrete_sequence=["#1f77b4", "#ff7f0e"],
                            height=500)
-        if fig_massa:
+        if fig_massa is not None:
             fig_massa.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_massa, use_container_width=True)
 
@@ -512,7 +512,7 @@ with tab5:
                          color=list(pops.keys()),
                          color_discrete_sequence=["#2ca02c", "#d62728"],
                          height=500)
-        if fig_pop:
+        if fig_pop is not None:
             fig_pop.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_pop, use_container_width=True)
     
