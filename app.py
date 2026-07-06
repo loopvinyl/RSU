@@ -286,32 +286,32 @@ with tab1:
 
     st.markdown("---")
     
-    if "UF" in df_res_filt.columns:
+    # Cria gráficos apenas se houver dados
+    if "UF" in df_res_filt.columns and not df_res_filt.empty:
         uf_counts = df_res_filt["UF"].value_counts().reset_index()
         uf_counts.columns = ["UF", "Quantidade"]
-        fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
-                        color="Quantidade", color_continuous_scale="Blues", height=500)
-        if fig_uf is not None:
+        if not uf_counts.empty:
+            fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
+                            color="Quantidade", color_continuous_scale="Blues", height=500)
             fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             fig_uf.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_uf, use_container_width=True)
 
-    if "POP_TOTAL" in df_res_filt.columns:
+    if "POP_TOTAL" in df_res_filt.columns and not df_res_filt.empty:
         fig_pop = px.histogram(df_res_filt, x="POP_TOTAL", nbins=50, 
                                title="Distribuição da população dos municípios",
                                labels={"POP_TOTAL": "População"},
                                color_discrete_sequence=["#2E86C1"], height=500)
-        if fig_pop is not None:
-            fig_pop.update_xaxis(tickformat=',.0f')
-            st.plotly_chart(fig_pop, use_container_width=True)
+        fig_pop.update_xaxis(tickformat=',.0f')
+        st.plotly_chart(fig_pop, use_container_width=True)
 
-    if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
+    if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns and not df_res_filt.empty:
         uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
         uf_massa = uf_massa.sort_values("MASSA_TOTAL_RSU", ascending=False).head(10)
-        fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
-                           labels={"MASSA_TOTAL_RSU": "Massa (t)"},
-                           color="MASSA_TOTAL_RSU", color_continuous_scale="Greens", height=500)
-        if fig_massa is not None:
+        if not uf_massa.empty:
+            fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
+                               labels={"MASSA_TOTAL_RSU": "Massa (t)"},
+                               color="MASSA_TOTAL_RSU", color_continuous_scale="Greens", height=500)
             fig_massa.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             fig_massa.update_yaxis(tickformat=',.0f')
             st.plotly_chart(fig_massa, use_container_width=True)
@@ -341,10 +341,9 @@ with tab2:
                                      title="Relação População vs Massa de RSU",
                                      labels={"POP_TOTAL": "População", "MASSA_TOTAL_RSU": "Massa (t)"},
                                      color="UF" if "UF" in df_res_filt.columns else None, height=500)
-            if fig_scatter is not None:
-                fig_scatter.update_xaxis(tickformat=',.0f')
-                fig_scatter.update_yaxis(tickformat=',.0f')
-                st.plotly_chart(fig_scatter, use_container_width=True)
+            fig_scatter.update_xaxis(tickformat=',.0f')
+            fig_scatter.update_yaxis(tickformat=',.0f')
+            st.plotly_chart(fig_scatter, use_container_width=True)
 
 # =========================================================
 # TAB 3 - ROTAS DE COLETA (REFINADA)
@@ -362,9 +361,9 @@ with tab3:
         if "TIPO_COLETA" in df_col_filt.columns:
             freq = df_col_filt["TIPO_COLETA"].value_counts().reset_index()
             freq.columns = ["Tipo", "Quantidade"]
-            fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
-                              color="Quantidade", color_continuous_scale="Viridis", height=500)
-            if fig_freq is not None:
+            if not freq.empty:
+                fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
+                                  color="Quantidade", color_continuous_scale="Viridis", height=500)
                 fig_freq.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                 fig_freq.update_yaxis(tickformat=',.0f')
                 st.plotly_chart(fig_freq, use_container_width=True)
@@ -372,9 +371,9 @@ with tab3:
         if "MASSA_ROTA" in df_col_filt.columns and "TIPO_COLETA" in df_col_filt.columns:
             mass_tipo = df_col_filt.groupby("TIPO_COLETA")["MASSA_ROTA"].sum().reset_index()
             mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
-            fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
-                             title="Massa coletada por tipo de coleta", hole=0.4, height=500)
-            if fig_pie is not None:
+            if not mass_tipo.empty:
+                fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
+                                 title="Massa coletada por tipo de coleta", hole=0.4, height=500)
                 st.plotly_chart(fig_pie, use_container_width=True)
 
         st.subheader("🔍 Amostra das rotas")
@@ -414,19 +413,18 @@ with tab4:
             if "MASSA_ROTA" in df_destino.columns:
                 mass_dest = df_destino.groupby("TIPO_DESTINO")["MASSA_ROTA"].sum().reset_index()
                 mass_dest = mass_dest.sort_values("MASSA_ROTA", ascending=False)
-                fig_dest = px.bar(mass_dest, x="TIPO_DESTINO", y="MASSA_ROTA", 
-                                  title="Massa destinada por tipo (dados de coleta)",
-                                  labels={"MASSA_ROTA": "Massa (t)"},
-                                  color="MASSA_ROTA", color_continuous_scale="Viridis", height=500)
-                if fig_dest is not None:
+                if not mass_dest.empty:
+                    fig_dest = px.bar(mass_dest, x="TIPO_DESTINO", y="MASSA_ROTA", 
+                                      title="Massa destinada por tipo (dados de coleta)",
+                                      labels={"MASSA_ROTA": "Massa (t)"},
+                                      color="MASSA_ROTA", color_continuous_scale="Viridis", height=500)
                     fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                     fig_dest.update_yaxis(tickformat=',.0f')
                     st.plotly_chart(fig_dest, use_container_width=True)
             else:
                 fig_dest = px.pie(destinos, values="Quantidade", names="Destino",
                                   title="Distribuição dos tipos de destino (contagem de rotas)", height=500)
-                if fig_dest is not None:
-                    st.plotly_chart(fig_dest, use_container_width=True)
+                st.plotly_chart(fig_dest, use_container_width=True)
 
         # Distribuição por Estado
         st.subheader("📊 Distribuição da Massa por Estado")
@@ -458,10 +456,9 @@ with tab4:
                     color_continuous_scale="Viridis",
                     height=500
                 )
-                if fig_bar is not None:
-                    fig_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-                    fig_bar.update_yaxis(tickformat=',.0f')
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                fig_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+                fig_bar.update_yaxis(tickformat=',.0f')
+                st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Todos os valores de massa são zero ou nulos. Não há dados para exibir.")
         else:
@@ -501,9 +498,8 @@ with tab5:
                            color=list(massas.keys()),
                            color_discrete_sequence=["#1f77b4", "#ff7f0e"],
                            height=500)
-        if fig_massa is not None:
-            fig_massa.update_yaxis(tickformat=',.0f')
-            st.plotly_chart(fig_massa, use_container_width=True)
+        fig_massa.update_yaxis(tickformat=',.0f')
+        st.plotly_chart(fig_massa, use_container_width=True)
 
     with col2:
         fig_pop = px.bar(x=list(pops.keys()), y=list(pops.values()),
@@ -512,9 +508,8 @@ with tab5:
                          color=list(pops.keys()),
                          color_discrete_sequence=["#2ca02c", "#d62728"],
                          height=500)
-        if fig_pop is not None:
-            fig_pop.update_yaxis(tickformat=',.0f')
-            st.plotly_chart(fig_pop, use_container_width=True)
+        fig_pop.update_yaxis(tickformat=',.0f')
+        st.plotly_chart(fig_pop, use_container_width=True)
     
     if "TIPO_COLETA" in df_col_2023.columns and "TIPO_COLETA" in df_col_2024.columns:
         st.subheader("📋 Evolução dos Tipos de Coleta")
