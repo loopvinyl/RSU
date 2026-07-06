@@ -298,7 +298,7 @@ with tab3:
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO CORRIGIDO)
+# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO E FALLBACK GARANTIDO)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -320,11 +320,11 @@ with tab4:
                                   title="Distribuição dos tipos de destino (contagem de rotas)")
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # ========== MAPA COROPLÉTICO (CORRIGIDO - SEM LOG) ==========
+        # ========== MAPA COROPLÉTICO (COM FALLBACK PARA BARRAS) ==========
         if "UF" in df_col_filt.columns:
             st.subheader("🗺️ Mapa da Massa Coletada por Estado")
             
-            # Tentar obter dados de MASSA_ROTA
+            # Preparar dados agregados por UF
             if "MASSA_ROTA" in df_col_filt.columns:
                 uf_mass = df_col_filt.groupby("UF")["MASSA_ROTA"].sum().reset_index()
             else:
@@ -339,14 +339,34 @@ with tab4:
                 else:
                     uf_mass = pd.DataFrame()
             
-            if not uf_mass.empty:
+            # Se não houver dados, exibe mensagem e para
+            if uf_mass.empty:
+                st.warning("Não foi possível encontrar uma coluna de massa para o mapa. Verifique os dados.")
+            else:
                 # Remove valores nulos e zero
                 uf_mass = uf_mass.dropna(subset=["UF", "MASSA_ROTA"])
                 uf_mass = uf_mass[uf_mass["MASSA_ROTA"] > 0]
                 
-                if not uf_mass.empty:
+                if uf_mass.empty:
+                    st.info("Todos os valores de massa são zero ou nulos. Não há dados para exibir.")
+                else:
+                    # Sempre exibe o gráfico de barras como base (garantia de visualização)
+                    st.markdown("#### 📊 Distribuição por estado (gráfico de barras)")
+                    fig_bar = px.bar(
+                        uf_mass.sort_values("MASSA_ROTA", ascending=False),
+                        x="UF",
+                        y="MASSA_ROTA",
+                        title="Massa coletada por estado",
+                        labels={"MASSA_ROTA": "Massa (t)"},
+                        color="MASSA_ROTA",
+                        color_continuous_scale="Viridis"
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                    
+                    # Tenta exibir o mapa coroplético (como complemento)
+                    st.markdown("#### 🗺️ Mapa coroplético (interativo)")
                     try:
-                        # Baixar GeoJSON do Brasil
+                        # Baixar GeoJSON
                         geojson_url = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson"
                         response = requests.get(geojson_url, timeout=10)
                         response.raise_for_status()
@@ -365,15 +385,8 @@ with tab4:
                         uf_mass = uf_mass.dropna(subset=['id'])
                         
                         if not uf_mass.empty:
-                            # --- CORREÇÃO: escala linear com corte no percentil 90 ---
-                            mass_vals = uf_mass["MASSA_ROTA"]
-                            # Define o máximo como o percentil 90 (elimina outliers extremos)
-                            p90 = mass_vals.quantile(0.90) if len(mass_vals) > 1 else mass_vals.max()
-                            min_val = 0
-                            
-                            # Paleta com forte contraste (vermelhos)
-                            color_scale = "Reds"
-                            
+                            # Define escala com corte no percentil 95 para evitar outliers
+                            p95 = uf_mass["MASSA_ROTA"].quantile(0.95)
                             fig_map = px.choropleth(
                                 uf_mass,
                                 geojson=geojson_data,
@@ -381,26 +394,17 @@ with tab4:
                                 color='MASSA_ROTA',
                                 hover_name='UF',
                                 title="Massa coletada por estado",
-                                color_continuous_scale=color_scale,
-                                range_color=(min_val, p90),  # CORTE NO PERCENTIL 90
+                                color_continuous_scale="Reds",
+                                range_color=(0, p95),
                                 labels={"MASSA_ROTA": "Massa (t)"}
                             )
                             fig_map.update_geos(fitbounds="locations", visible=False)
                             st.plotly_chart(fig_map, use_container_width=True)
-                            
-                            st.caption(f"🔹 Escala ajustada: máximo = {p90:,.0f} t (percentil 90). Estados com valores acima aparecem na cor mais escura.")
+                            st.caption(f"🔹 Escala ajustada: máximo = {p95:,.0f} t (percentil 95).")
                         else:
-                            st.warning("Não foi possível mapear as siglas. Exibindo gráfico de barras.")
-                            fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
-                            st.plotly_chart(fig_bar, use_container_width=True)
+                            st.info("Não foi possível mapear as siglas para o mapa. O gráfico de barras acima já mostra os dados.")
                     except Exception as e:
-                        st.warning(f"Erro ao gerar mapa: {e}. Exibindo gráfico de barras.")
-                        fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
-                        st.plotly_chart(fig_bar, use_container_width=True)
-                else:
-                    st.info("Sem dados positivos para exibir no mapa (todos os valores são zero ou nulos).")
-            else:
-                st.warning("Não foi possível encontrar uma coluna de massa para o mapa.")
+                        st.info(f"⚠️ Não foi possível gerar o mapa coroplético: {e}. O gráfico de barras acima já mostra os dados.")
 
 # =========================================================
 # TAB 5 - COMPARAÇÃO 2023 vs 2024
