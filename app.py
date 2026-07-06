@@ -264,6 +264,7 @@ with tab1:
         st.markdown("---")
         st.subheader("📊 Indicadores de Gestão")
 
+        # Geração per capita (com explicação)
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "POP_TOTAL" in df_res_filt.columns:
             massa_total = df_res_filt["MASSA_TOTAL_RSU"].sum()
             pop_total = df_res_filt["POP_TOTAL"].sum()
@@ -271,15 +272,36 @@ with tab1:
                 per_capita_ano = massa_total / pop_total
                 per_capita_dia = per_capita_ano / 365
                 col1, col2 = st.columns(2)
-                col1.metric("Geração per capita (kg/hab/ano)", formatar_metric(per_capita_ano, 2))
-                col2.metric("Geração per capita (kg/hab/dia)", formatar_metric(per_capita_dia, 3))
+                col1.metric(
+                    "Geração per capita (kg/hab/ano)",
+                    formatar_metric(per_capita_ano, 2),
+                    help="Calculado como: Massa total de RSU (kg) / População total. Fonte: SNIS."
+                )
+                col1.caption("📌 **Fórmula:** Massa total (kg) ÷ População total = kg/hab/ano")
+                col1.caption(f"📌 **Dados usados:** Massa total = {formatar_metric(massa_total, 0)} t = {formatar_metric(massa_total*1000, 0)} kg; População = {formatar_metric(pop_total, 0)} hab")
 
+                col2.metric(
+                    "Geração per capita (kg/hab/dia)",
+                    formatar_metric(per_capita_dia, 3),
+                    help="Calculado como: Geração anual (kg/hab/ano) / 365 dias. Fonte: SNIS."
+                )
+                col2.caption("📌 **Fórmula:** Geração anual (kg/hab/ano) ÷ 365 = kg/hab/dia")
+                col2.caption(f"📌 **Cálculo:** {formatar_metric(per_capita_ano, 4)} kg/hab/ano ÷ 365 = {formatar_metric(per_capita_dia, 4)} kg/hab/dia")
+
+        # Taxa de coleta seletiva
         if "MASSA_SELETIVA" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
             massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
             if massa_total > 0:
                 taxa_cobertura = (massa_seletiva / massa_total) * 100
-                st.metric("Taxa de coleta seletiva (%)", formatar_metric(taxa_cobertura, 2))
+                st.metric(
+                    "Taxa de coleta seletiva (%)",
+                    formatar_metric(taxa_cobertura, 2),
+                    help="Percentual da massa total que é coletada seletivamente. Fonte: SNIS."
+                )
+                st.caption("📌 **Fórmula:** (Massa coletada seletivamente ÷ Massa total de RSU) × 100")
+                st.caption(f"📌 **Dados:** Massa seletiva = {formatar_metric(massa_seletiva, 0)} t; Massa total = {formatar_metric(massa_total, 0)} t")
 
+        # Ranking de maior e menor massa
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
             df_rank = df_res_filt.dropna(subset=["MASSA_TOTAL_RSU"])
             if not df_rank.empty:
@@ -296,6 +318,8 @@ with tab1:
                     f"{menor['MUNICIPIO']} ({menor['UF']})",
                     f"{formatar_metric(menor['MASSA_TOTAL_RSU'], 0)} t"
                 )
+                col1.caption(f"📌 Fonte: SNIS - município com maior massa declarada.")
+                col2.caption(f"📌 Fonte: SNIS - município com menor massa declarada.")
 
     st.markdown("---")
     
@@ -503,7 +527,13 @@ with tab5:
     
     if not np.isnan(massas["2023"]) and not np.isnan(massas["2024"]) and massas["2023"] > 0:
         var_massa = ((massas["2024"] - massas["2023"]) / massas["2023"]) * 100
-        st.metric("Variação da massa total", f"{formatar_metric(var_massa, 2)}%")
+        st.metric(
+            "Variação da massa total",
+            f"{formatar_metric(var_massa, 2)}%",
+            help="Calculado como: ((Massa 2024 - Massa 2023) / Massa 2023) × 100"
+        )
+        st.caption("📌 **Fórmula:** (Massa 2024 - Massa 2023) ÷ Massa 2023 × 100")
+        st.caption(f"📌 **Dados:** 2023 = {formatar_metric(massas['2023'], 0)} t; 2024 = {formatar_metric(massas['2024'], 0)} t")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -544,7 +574,20 @@ with tab5:
         st.plotly_chart(fig_comp, use_container_width=True)
 
 # =========================================================
-# RODAPÉ
+# RODAPÉ - METODOLOGIA E FONTES
 # =========================================================
 st.markdown("---")
+st.subheader("📌 Metodologia e Fontes para Auditoria")
+st.markdown("""
+- **Fonte dos dados:** SNIS (Sistema Nacional de Informações sobre Saneamento) – Módulo Manejo de Resíduos Sólidos, anos 2023 e 2024.  
+- **Período de referência:** Dados anuais declarados pelos municípios.  
+- **Indicadores calculados:**  
+  - **Geração per capita (kg/hab/ano):** Massa total de RSU (convertida para kg) ÷ População total.  
+  - **Geração per capita (kg/hab/dia):** Geração per capita anual ÷ 365 dias.  
+  - **Taxa de coleta seletiva (%):** (Massa de resíduos coletada seletivamente ÷ Massa total de RSU) × 100.  
+  - **Variação da massa total:** ((Massa 2024 - Massa 2023) ÷ Massa 2023) × 100.  
+- **Transbordos:** Por padrão, rotas com destino "Transbordo" são excluídas para evitar dupla contagem. O usuário pode optar por incluí-las via checkbox.  
+- **Conversões:** Massas em toneladas são convertidas para kg para o cálculo per capita (1 t = 1000 kg).  
+- **Arredondamentos:** Valores exibidos com duas casas decimais, exceto per capita diária (três casas) para melhor precisão.
+""")
 st.caption(f"📅 Dados do SNIS - {ano_base} | Desenvolvido com Streamlit e Plotly | Arquivos locais.")
