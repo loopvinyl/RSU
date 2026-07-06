@@ -34,9 +34,12 @@ ano_selecionado = st.selectbox(
     index=1
 )
 
+# =========================================================
+# ARQUIVOS LOCAIS (dentro do mesmo diretório do app)
+# =========================================================
 URLS_POR_ANO = {
-    "2023": "https://github.com/loopvinyl/tco2eqv7/raw/main/rsuBrasil_2023.xlsx",
-    "2024": "https://github.com/loopvinyl/tco2eqv7/raw/main/rsuBrasil_2024.xlsx"
+    "2023": "rsuBrasil_2023.xlsx",
+    "2024": "rsuBrasil_2024.xlsx"
 }
 
 # =========================================================
@@ -344,15 +347,21 @@ def determinar_mcf_por_destino(destino, tipo_residuo='organico'):
     return mcf_base
 
 # =========================================================
-# Carga e preparação dos dados
+# Carga e preparação dos dados (AGORA LOCAL)
 # =========================================================
 @st.cache_data
 def load_data(ano):
-    url = URLS_POR_ANO[ano]
-    df = pd.read_excel(url, sheet_name="Manejo_Coleta_e_Destinação", header=12)
-    df = df.dropna(how="all")
-    df.columns = [str(col).strip() for col in df.columns]
-    return df
+    """Carrega o arquivo Excel localmente (dentro do repositório)."""
+    caminho = URLS_POR_ANO[ano]
+    try:
+        df = pd.read_excel(caminho, sheet_name="Manejo_Coleta_e_Destinação", header=12)
+        return df
+    except FileNotFoundError:
+        st.error(f"❌ Arquivo não encontrado: {caminho}. Verifique se o arquivo existe no diretório do app.")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ Erro ao ler o arquivo: {e}")
+        st.stop()
 
 df = load_data(ano_selecionado)
 
