@@ -246,20 +246,20 @@ with tab1:
                 taxa_cobertura = (massa_seletiva / massa_total) * 100
                 st.metric("Taxa de coleta seletiva (%)", f"{taxa_cobertura:.2f}%")
 
-        # Ranking: município com maior e menor massa (usando dados COMPLETOS, sem filtros)
-        if "MASSA_TOTAL_RSU" in df_res.columns and "MUNICIPIO" in df_res.columns:
-            df_rank = df_res.dropna(subset=["MASSA_TOTAL_RSU"])
+        # Ranking: município com maior e menor massa
+        if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
+            df_rank = df_res_filt.dropna(subset=["MASSA_TOTAL_RSU"])
             if not df_rank.empty:
                 maior = df_rank.loc[df_rank["MASSA_TOTAL_RSU"].idxmax()]
                 menor = df_rank.loc[df_rank["MASSA_TOTAL_RSU"].idxmin()]
                 col1, col2 = st.columns(2)
                 col1.metric(
-                    "🏆 Maior massa (total RSU)",
+                    "🏆 Maior massa",
                     f"{maior['MUNICIPIO']} ({maior['UF']})",
                     f"{maior['MASSA_TOTAL_RSU']:,.0f} t".replace(",", ".")
                 )
                 col2.metric(
-                    "📉 Menor massa (total RSU)",
+                    "📉 Menor massa",
                     f"{menor['MUNICIPIO']} ({menor['UF']})",
                     f"{menor['MASSA_TOTAL_RSU']:,.0f} t".replace(",", ".")
                 )
