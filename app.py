@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import io
 import os
 
 # =========================================================
@@ -23,80 +21,71 @@ Navegue pelas abas para entender a estrutura, distribuições e principais indic
 """)
 
 # =========================================================
-# CARREGAMENTO DOS DADOS (UPLOAD OU LOCAL)
+# CARREGAMENTO DOS ARQUIVOS (DIRETÓRIO LOCAL)
 # =========================================================
-st.sidebar.header("📂 Carregar arquivos")
+ARQUIVO_2023 = "rsuBrasil_2023.xlsx"
+ARQUIVO_2024 = "rsuBrasil_2024.xlsx"
 
-uploaded_2023 = st.sidebar.file_uploader("Arquivo 2023 (rsuBrasil_2023.xlsx)", type=["xlsx"])
-uploaded_2024 = st.sidebar.file_uploader("Arquivo 2024 (rsuBrasil_2024.xlsx)", type=["xlsx"])
+def verificar_arquivos():
+    if not os.path.exists(ARQUIVO_2023):
+        st.error(f"❌ Arquivo {ARQUIVO_2023} não encontrado. Coloque-o no mesmo diretório do app.")
+        return False
+    if not os.path.exists(ARQUIVO_2024):
+        st.error(f"❌ Arquivo {ARQUIVO_2024} não encontrado. Coloque-o no mesmo diretório do app.")
+        return False
+    return True
 
-# Se não houver upload, tenta carregar do diretório local (para desenvolvimento)
-if uploaded_2023 is None and uploaded_2024 is None:
-    if os.path.exists("rsuBrasil_2023.xlsx") and os.path.exists("rsuBrasil_2024.xlsx"):
-        st.sidebar.info("📁 Usando arquivos locais (mesmo diretório)")
-        path_2023 = "rsuBrasil_2023.xlsx"
-        path_2024 = "rsuBrasil_2024.xlsx"
-    else:
-        st.sidebar.warning("⚠️ Faça upload dos arquivos ou coloque-os no diretório.")
-        st.stop()
-else:
-    # Salvar uploads em disco temporário (ou ler direto)
-    if uploaded_2023 is not None:
-        path_2023 = "temp_2023.xlsx"
-        with open(path_2023, "wb") as f:
-            f.write(uploaded_2023.getbuffer())
-    else:
-        path_2023 = None
-    if uploaded_2024 is not None:
-        path_2024 = "temp_2024.xlsx"
-        with open(path_2024, "wb") as f:
-            f.write(uploaded_2024.getbuffer())
-    else:
-        path_2024 = None
+if not verificar_arquivos():
+    st.stop()
+
+st.sidebar.success("✅ Arquivos encontrados no diretório!")
 
 # =========================================================
-# FUNÇÕES DE LEITURA INTELIGENTE
+# FUNÇÃO PARA LER ABA INTELIGENTEMENTE
 # =========================================================
-def ler_aba_inteligente(caminho, aba, header_row=None):
+def ler_aba(caminho, nome_aba):
     """
-    Lê uma aba do Excel identificando automaticamente onde estão os dados.
+    Lê uma aba do Excel, identificando a linha de cabeçalho.
     """
     try:
-        # Primeiro, ler sem header para verificar as primeiras linhas
-        df_raw = pd.read_excel(caminho, sheet_name=aba, header=None)
-        # Procurar a linha que contém "CÓDIGO DO IBGE" (indicador de cabeçalho)
+        # Primeiro, ler sem cabeçalho para varrer as primeiras linhas
+        df_raw = pd.read_excel(caminho, sheet_name=nome_aba, header=None)
+        # Identificar linha que contém "CÓDIGO DO IBGE" (ou similar)
         header_idx = None
         for i, row in df_raw.iterrows():
-            if row.astype(str).str.contains("CÓDIGO DO IBGE", case=False, na=False).any():
+            # Verifica se alguma célula da linha contém a string
+            if row.astype(str).str.contains("CÓDIGO DO IBGE|RESPONDEU AO MÓDULO", case=False, na=False).any():
                 header_idx = i
                 break
         if header_idx is not None:
-            df = pd.read_excel(caminho, sheet_name=aba, header=header_idx)
+            df = pd.read_excel(caminho, sheet_name=nome_aba, header=header_idx)
         else:
-            # Fallback: usar header=0 se parecer dados
-            df = pd.read_excel(caminho, sheet_name=aba, header=0)
+            # Fallback: usar a primeira linha que não seja toda vazia
+            df = pd.read_excel(caminho, sheet_name=nome_aba, header=0)
         # Remover linhas completamente vazias
         df = df.dropna(how="all")
+        # Remover colunas com todos os valores nulos
+        df = df.dropna(axis=1, how="all")
         return df
     except Exception as e:
-        st.error(f"Erro ao ler aba {aba}: {e}")
+        st.error(f"Erro ao ler a aba '{nome_aba}' do arquivo {caminho}: {e}")
         return None
 
+# =========================================================
+# CARREGAR DADOS COM CACHE
+# =========================================================
 @st.cache_data
-def carregar_dados(ano, caminho):
-    """
-    Carrega as abas principais: Resíduos e Coleta.
-    """
-    if caminho is None:
-        return None, None
-    df_residuos = ler_aba_inteligente(caminho, "Manejo_Resíduos_Sólidos_Urbanos")
-    df_coleta = ler_aba_inteligente(caminho, "Manejo_Coleta_e_Destinação")
-    return df_residuos, df_coleta
+def carregar_dados(ano):
+    caminho = ARQUIVO_2023 if ano == 2023 else ARQUIVO_2024
+    df_res = ler_aba(caminho, "Manejo_Resíduos_Sólidos_Urbanos")
+    df_col = ler_aba(caminho, "Manejo_Coleta_e_Destinação")
+    return df_res, df_col
 
-# Carregar os dados
-df_res_2023, df_col_2023 = carregar_dados(2023, path_2023)
-df_res_2024, df_col_2024 = carregar_dados(2024, path_2024)
+# Carregar ambos os anos
+df_res_2023, df_col_2023 = carregar_dados(2023)
+df_res_2024, df_col_2024 = carregar_dados(2024)
 
+# Verificar se os dados foram carregados
 if df_res_2023 is None or df_res_2024 is None:
     st.error("❌ Não foi possível carregar os dados. Verifique os arquivos.")
     st.stop()
@@ -105,10 +94,11 @@ if df_res_2023 is None or df_res_2024 is None:
 # PRÉ-PROCESSAMENTO
 # =========================================================
 def padronizar_colunas(df):
-    """Renomeia colunas comuns para facilitar a análise."""
+    """
+    Renomeia colunas comuns para facilitar a análise.
+    """
     if df is None:
         return df
-    # Mapeamento de nomes comuns baseado na análise
     col_map = {}
     for col in df.columns:
         col_str = str(col).strip()
@@ -126,11 +116,11 @@ def padronizar_colunas(df):
             col_map[col] = "POP_URBANA"
         elif "POPULAÇÃO RURAL" in col_str:
             col_map[col] = "POP_RURAL"
-        elif "Massa total anual" in col_str and "domiciliares" in col_str and "seletiva" not in col_str:
+        elif "Massa total anual proveniente das rotas de coleta de resíduos sólidos domiciliares" in col_str:
             col_map[col] = "MASSA_DOMICILIAR"
-        elif "Massa total anual" in col_str and "seletiva" in col_str:
+        elif "Massa total anual proveniente das rotas de coleta seletiva" in col_str:
             col_map[col] = "MASSA_SELETIVA"
-        elif "Massa total anual" in col_str and "limpeza" in col_str:
+        elif "Massa total anual proveniente das rotas de coleta de resíduos sólidos de limpeza urbana" in col_str:
             col_map[col] = "MASSA_LIMPEZA"
         elif "Massa total anual de resíduos sólidos urbanos" in col_str:
             col_map[col] = "MASSA_TOTAL_RSU"
@@ -140,19 +130,32 @@ def padronizar_colunas(df):
             col_map[col] = "TIPO_DESTINO"
         elif "Massa de resíduos sólidos total coletada" in col_str:
             col_map[col] = "MASSA_ROTA"
-    df = df.rename(columns=col_map)
+        elif "Quantidade total de veículos" in col_str:
+            col_map[col] = "QTD_VEICULOS"
+    if col_map:
+        df = df.rename(columns=col_map)
     return df
 
 def converter_numericas(df):
-    """Converte colunas numéricas (que vieram como objeto) para float."""
+    """
+    Converte colunas que devem ser numéricas para float, ignorando erros.
+    """
     if df is None:
         return df
     for col in df.columns:
-        if col not in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO"]:
-            # Tenta converter para numérico
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+        # Pular colunas que são categóricas
+        if col in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO", "NATUREZA JURÍDICA", "CNPJ"]:
+            continue
+        # Se a coluna não for numérica, tenta converter
+        if df[col].dtype == object:
+            try:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            except Exception as e:
+                # Se falhar, mantém como está
+                pass
     return df
 
+# Aplicar padronização e conversão
 df_res_2023 = padronizar_colunas(df_res_2023)
 df_res_2023 = converter_numericas(df_res_2023)
 df_res_2024 = padronizar_colunas(df_res_2024)
@@ -164,39 +167,14 @@ df_col_2024 = padronizar_colunas(df_col_2024)
 df_col_2024 = converter_numericas(df_col_2024)
 
 # =========================================================
-# FUNÇÕES AUXILIARES PARA ANÁLISE
-# =========================================================
-def resumo_dataframe(df, nome):
-    if df is None:
-        return pd.DataFrame()
-    buffer = io.StringIO()
-    df.info(buf=buffer)
-    info_str = buffer.getvalue()
-    stats = {
-        "Nome": nome,
-        "Linhas": df.shape[0],
-        "Colunas": df.shape[1],
-        "Memória (MB)": df.memory_usage(deep=True).sum() / 1e6,
-        "Nulos (%)": (df.isna().sum().sum() / (df.shape[0]*df.shape[1])) * 100,
-    }
-    return stats
-
-def colunas_numericas(df):
-    return df.select_dtypes(include=np.number).columns.tolist()
-
-def colunas_categoricas(df):
-    return df.select_dtypes(include="object").columns.tolist()
-
-# =========================================================
 # SIDEBAR - FILTROS GLOBAIS
 # =========================================================
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔍 Filtros")
 
-# Selecionar ano base para análises
+# Selecionar ano base
 ano_base = st.sidebar.selectbox("Ano para análise detalhada", [2023, 2024], index=1)
 
-# Definir os dataframes ativos
 if ano_base == 2023:
     df_res = df_res_2023
     df_col = df_col_2023
@@ -204,14 +182,13 @@ else:
     df_res = df_res_2024
     df_col = df_col_2024
 
-# Filtros de UF e município (se disponíveis)
+# Filtros
 ufs = sorted(df_res["UF"].dropna().unique()) if "UF" in df_res.columns else []
 uf_selecionada = st.sidebar.selectbox("UF (opcional)", ["Todas"] + ufs)
 
 municipios = sorted(df_res["MUNICIPIO"].dropna().unique()) if "MUNICIPIO" in df_res.columns else []
 municipio_selecionado = st.sidebar.selectbox("Município (opcional)", ["Todos"] + municipios)
 
-# Aplicar filtros
 def filtrar_df(df):
     if df is None:
         return df
@@ -225,7 +202,7 @@ df_res_filt = filtrar_df(df_res)
 df_col_filt = filtrar_df(df_col)
 
 # =========================================================
-# ABAS PRINCIPAIS
+# ABAS
 # =========================================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📌 Visão Geral",
@@ -254,16 +231,14 @@ with tab1:
     with col2:
         st.subheader("📦 Abas disponíveis")
         st.markdown("""
-        - **Resíduos Sólidos Urbanos**: dados gerais dos municípios (população, massas, caracterização).
-        - **Coleta e Destinação**: rotas de coleta, massas por tipo, destinos.
+        - **Resíduos Sólidos Urbanos**: dados gerais dos municípios.
+        - **Coleta e Destinação**: rotas de coleta, massas e destinos.
         - **Veículos**: frota utilizada.
-        - **Cooperativas**: informações sobre catadores e associações.
+        - **Cooperativas**: informações sobre catadores.
         """)
 
     st.markdown("---")
-    st.subheader("🧹 Qualidade dos Dados")
-
-    # Estatísticas de nulos para a aba Resíduos
+    st.subheader("🧹 Qualidade dos Dados - Colunas com valores nulos")
     if df_res_filt is not None:
         nulos = df_res_filt.isna().sum()
         nulos = nulos[nulos > 0].sort_values(ascending=False)
@@ -281,22 +256,6 @@ with tab1:
         else:
             st.success("✅ Nenhum valor nulo encontrado!")
 
-    # Comparativo rápido entre anos
-    st.markdown("---")
-    st.subheader("📊 Comparativo Rápido 2023 vs 2024")
-
-    # Total de municípios e massa (se disponível)
-    if "MASSA_TOTAL_RSU" in df_res_2023.columns and "MASSA_TOTAL_RSU" in df_res_2024.columns:
-        total_massa_2023 = df_res_2023["MASSA_TOTAL_RSU"].sum()
-        total_massa_2024 = df_res_2024["MASSA_TOTAL_RSU"].sum()
-        diff_massa = total_massa_2024 - total_massa_2023
-        pct_massa = (diff_massa / total_massa_2023) * 100 if total_massa_2023 > 0 else 0
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("2023", f"{total_massa_2023:,.0f} t".replace(",", "."))
-        col2.metric("2024", f"{total_massa_2024:,.0f} t".replace(",", "."))
-        col3.metric("Variação", f"{diff_massa:+,.0f} t ({pct_massa:+.1f}%)".replace(",", "."))
-
 # =========================================================
 # TAB 2 - MUNICÍPIOS
 # =========================================================
@@ -304,7 +263,6 @@ with tab2:
     st.header("🏙️ Análise por Município")
 
     if df_res_filt is not None and not df_res_filt.empty:
-        # Selecionar colunas para exibir
         cols_disponiveis = df_res_filt.columns.tolist()
         cols_para_exibir = st.multiselect(
             "Selecione as colunas para exibir na tabela",
@@ -313,30 +271,23 @@ with tab2:
         )
 
         if cols_para_exibir:
-            # Tabela com formatação
             df_tab = df_res_filt[cols_para_exibir].copy()
-            # Formatar números
             for col in df_tab.columns:
                 if col not in ["MUNICIPIO", "UF", "MACRO"]:
                     df_tab[col] = df_tab[col].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
             st.dataframe(df_tab, use_container_width=True, height=500)
 
-        # Gráficos de distribuição
-        st.subheader("📊 Distribuição de Massa e População")
-
-        # Histograma de população
         if "POP_TOTAL" in df_res_filt.columns:
             fig_pop = px.histogram(
                 df_res_filt,
                 x="POP_TOTAL",
-                title="Distribuição da População dos Municípios",
+                title="Distribuição da População",
                 labels={"POP_TOTAL": "População"},
                 nbins=50,
                 color_discrete_sequence=["#2E86C1"]
             )
             st.plotly_chart(fig_pop, use_container_width=True)
 
-        # Top 10 municípios por massa
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
             top10 = df_res_filt.nlargest(10, "MASSA_TOTAL_RSU")
             fig_top = px.bar(
@@ -345,8 +296,7 @@ with tab2:
                 y="MASSA_TOTAL_RSU",
                 title=f"Top 10 municípios - {ano_base}",
                 labels={"MASSA_TOTAL_RSU": "Massa (t)"},
-                color="UF" if "UF" in top10.columns else None,
-                hover_data=["POP_TOTAL"] if "POP_TOTAL" in top10.columns else None
+                color="UF" if "UF" in top10.columns else None
             )
             fig_top.update_layout(xaxis_tickangle=45)
             st.plotly_chart(fig_top, use_container_width=True)
@@ -358,7 +308,6 @@ with tab3:
     st.header("🚚 Análise das Rotas de Coleta")
 
     if df_col_filt is not None and not df_col_filt.empty:
-        # Estatísticas básicas
         col1, col2, col3 = st.columns(3)
         col1.metric("Total de rotas", df_col_filt.shape[0])
         if "MASSA_ROTA" in df_col_filt.columns:
@@ -366,9 +315,7 @@ with tab3:
         if "TIPO_COLETA" in df_col_filt.columns:
             col3.metric("Tipos de coleta distintos", df_col_filt["TIPO_COLETA"].nunique())
 
-        st.subheader("📊 Distribuição por Tipo de Coleta")
         if "TIPO_COLETA" in df_col_filt.columns:
-            # Frequência
             freq = df_col_filt["TIPO_COLETA"].value_counts().reset_index()
             freq.columns = ["Tipo", "Quantidade"]
             fig_freq = px.bar(
@@ -382,7 +329,6 @@ with tab3:
             fig_freq.update_layout(xaxis_tickangle=45)
             st.plotly_chart(fig_freq, use_container_width=True)
 
-            # Massa por tipo (se disponível)
             if "MASSA_ROTA" in df_col_filt.columns:
                 mass_tipo = df_col_filt.groupby("TIPO_COLETA")["MASSA_ROTA"].sum().reset_index()
                 mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
@@ -395,7 +341,6 @@ with tab3:
                 )
                 st.plotly_chart(fig_mass, use_container_width=True)
 
-        # Tabela com amostra das rotas
         st.subheader("🔍 Amostra das rotas")
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
@@ -407,10 +352,8 @@ with tab4:
 
     if df_col_filt is not None and not df_col_filt.empty:
         if "TIPO_DESTINO" in df_col_filt.columns:
-            # Distribuição por destino
             destinos = df_col_filt["TIPO_DESTINO"].value_counts().reset_index()
             destinos.columns = ["Destino", "Quantidade"]
-            # Massa por destino (se disponível)
             if "MASSA_ROTA" in df_col_filt.columns:
                 mass_dest = df_col_filt.groupby("TIPO_DESTINO")["MASSA_ROTA"].sum().reset_index()
                 mass_dest = mass_dest.sort_values("MASSA_ROTA", ascending=False)
@@ -426,7 +369,6 @@ with tab4:
                 fig_dest.update_layout(xaxis_tickangle=45)
                 st.plotly_chart(fig_dest, use_container_width=True)
             else:
-                # Apenas contagem
                 fig_dest = px.pie(
                     destinos,
                     values="Quantidade",
@@ -435,18 +377,17 @@ with tab4:
                 )
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # Mapa coroplético (por UF) se houver massa
+        # Mapa coroplético
         if "UF" in df_col_filt.columns and "MASSA_ROTA" in df_col_filt.columns:
             st.subheader("🗺️ Mapa da Massa Coletada por Estado")
             uf_mass = df_col_filt.groupby("UF")["MASSA_ROTA"].sum().reset_index()
-            # Usar siglas para mapear
             fig_map = px.choropleth(
                 uf_mass,
                 locations="UF",
                 locationmode="Brazil-states",
                 color="MASSA_ROTA",
                 hover_name="UF",
-                title="Massa coletada por estado (2024)",
+                title="Massa coletada por estado",
                 color_continuous_scale="Greens",
                 labels={"MASSA_ROTA": "Massa (t)"}
             )
@@ -459,7 +400,6 @@ with tab4:
 with tab5:
     st.header("📈 Comparação entre 2023 e 2024")
 
-    # Métricas agregadas
     def get_metric(df, col):
         if df is not None and col in df.columns:
             return df[col].sum()
@@ -497,7 +437,6 @@ with tab5:
         )
         st.plotly_chart(fig_pop, use_container_width=True)
 
-    # Comparação de distribuição de tipos de coleta
     if "TIPO_COLETA" in df_col_2023.columns and "TIPO_COLETA" in df_col_2024.columns:
         st.subheader("📋 Evolução dos Tipos de Coleta")
         freq_2023 = df_col_2023["TIPO_COLETA"].value_counts().reset_index()
@@ -515,8 +454,6 @@ with tab5:
             barmode="group"
         )
         st.plotly_chart(fig_comp, use_container_width=True)
-
-    st.info("💡 Explore as outras abas para análises mais detalhadas por município, rotas e destinos.")
 
 # =========================================================
 # RODAPÉ
