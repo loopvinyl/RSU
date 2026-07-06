@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import requests  # necessário para baixar o GeoJSON
 
 # =========================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -44,22 +45,16 @@ st.sidebar.success("✅ Arquivos encontrados!")
 # FUNÇÃO PARA LER ABA (BUSCA AUTOMÁTICA DO HEADER)
 # =========================================================
 def ler_aba(caminho, nome_aba):
-    """
-    Lê uma aba do Excel, identificando a linha que contém "CÓDIGO DO IBGE" e "MUNICÍPIO".
-    Retorna um DataFrame com os dados.
-    """
     try:
         df_raw = pd.read_excel(caminho, sheet_name=nome_aba, header=None)
         header_idx = None
         for i, row in df_raw.iterrows():
             row_str = row.astype(str).str.upper()
-            # Procura a linha com "CÓDIGO DO IBGE" e "MUNICÍPIO" (ou "MUNICIPIO")
             if row_str.str.contains("CÓDIGO DO IBGE", na=False).any() and \
                (row_str.str.contains("MUNICÍPIO", na=False).any() or row_str.str.contains("MUNICIPIO", na=False).any()):
                 header_idx = i
                 break
         if header_idx is None:
-            # Fallback: procura apenas por "MUNICÍPIO"
             for i, row in df_raw.iterrows():
                 if row.astype(str).str.contains("MUNICÍPIO", case=False, na=False).any():
                     header_idx = i
@@ -67,9 +62,7 @@ def ler_aba(caminho, nome_aba):
         if header_idx is not None:
             df = pd.read_excel(caminho, sheet_name=nome_aba, header=header_idx)
         else:
-            # Último recurso: usa a primeira linha como cabeçalho
             df = pd.read_excel(caminho, sheet_name=nome_aba, header=0)
-        # Remove linhas e colunas totalmente vazias
         df = df.dropna(how="all")
         df = df.dropna(axis=1, how="all")
         return df
@@ -98,16 +91,11 @@ if df_res_2023 is None or df_res_2024 is None:
 # PRÉ-PROCESSAMENTO (PADRONIZAÇÃO DE COLUNAS)
 # =========================================================
 def padronizar_colunas(df):
-    """
-    Renomeia colunas específicas para nomes padronizados, se existirem.
-    Não inventa colunas que não existem.
-    """
     if df is None:
         return df
     col_map = {}
     for col in df.columns:
         col_str = str(col).strip()
-        # Mapeamento apenas para colunas que existem no relatório
         if "CÓDIGO DO IBGE" in col_str:
             col_map[col] = "COD_IBGE"
         elif "MUNICÍPIO" in col_str:
@@ -143,7 +131,6 @@ def padronizar_colunas(df):
     return df
 
 def converter_numericas(df):
-    """Converte colunas que são do tipo object para numérico, se possível."""
     if df is None:
         return df
     for col in df.columns:
@@ -156,7 +143,6 @@ def converter_numericas(df):
                 pass
     return df
 
-# Aplicar padronização e conversão para ambos os anos
 df_res_2023 = padronizar_colunas(df_res_2023)
 df_res_2023 = converter_numericas(df_res_2023)
 df_res_2024 = padronizar_colunas(df_res_2024)
@@ -182,11 +168,9 @@ else:
     df_res = df_res_2024
     df_col = df_col_2024
 
-# Filtro de UF
 ufs = sorted(df_res["UF"].dropna().unique()) if "UF" in df_res.columns else []
 uf_selecionada = st.sidebar.selectbox("UF (opcional)", ["Todas"] + ufs)
 
-# Filtro de população (se existir)
 if "POP_TOTAL" in df_res.columns:
     pop_min = int(df_res["POP_TOTAL"].min()) if not df_res["POP_TOTAL"].isna().all() else 0
     pop_max = int(df_res["POP_TOTAL"].max()) if not df_res["POP_TOTAL"].isna().all() else 10000000
@@ -238,7 +222,6 @@ with tab1:
             pop_total = df_res_filt["POP_TOTAL"].sum()
             st.metric("População total", f"{pop_total:,.0f}".replace(",", "."))
     st.markdown("---")
-    
     if "UF" in df_res_filt.columns:
         uf_counts = df_res_filt["UF"].value_counts().reset_index()
         uf_counts.columns = ["UF", "Quantidade"]
@@ -246,14 +229,12 @@ with tab1:
                         color="Quantidade", color_continuous_scale="Blues")
         fig_uf.update_layout(xaxis_tickangle=45)
         st.plotly_chart(fig_uf, use_container_width=True)
-    
     if "POP_TOTAL" in df_res_filt.columns:
         fig_pop = px.histogram(df_res_filt, x="POP_TOTAL", nbins=50, 
                                title="Distribuição da população dos municípios",
                                labels={"POP_TOTAL": "População"},
                                color_discrete_sequence=["#2E86C1"])
         st.plotly_chart(fig_pop, use_container_width=True)
-    
     if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
         uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
         uf_massa = uf_massa.sort_values("MASSA_TOTAL_RSU", ascending=False).head(10)
@@ -317,7 +298,7 @@ with tab3:
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO COM FALLBACK)
+# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO USANDO GEOJSON)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -339,22 +320,22 @@ with tab4:
                                   title="Distribuição dos tipos de destino (contagem de rotas)")
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # ========== MAPA COROPLÉTICO ==========
+        # ========== MAPA COROPLÉTICO COM GEOJSON ==========
         if "UF" in df_col_filt.columns:
             st.subheader("🗺️ Mapa da Massa Coletada por Estado")
             
-            # Tenta usar MASSA_ROTA da aba de coleta
+            # Tenta usar MASSA_ROTA
             if "MASSA_ROTA" in df_col_filt.columns:
                 uf_mass = df_col_filt.groupby("UF")["MASSA_ROTA"].sum().reset_index()
             else:
                 uf_mass = pd.DataFrame()
             
-            # Se não houver dados em MASSA_ROTA, tenta usar MASSA_TOTAL_RSU da aba de resíduos
+            # Fallback para MASSA_TOTAL_RSU
             if uf_mass.empty or uf_mass["MASSA_ROTA"].sum() == 0:
                 if "MASSA_TOTAL_RSU" in df_res_filt.columns and "UF" in df_res_filt.columns:
                     uf_mass = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
-                    uf_mass.columns = ["UF", "MASSA_ROTA"]  # Renomeia para padronizar
-                    st.info("📊 Exibindo massa total de RSU (dados da tabela de resíduos, pois a coluna 'MASSA_ROTA' não tem dados suficientes)")
+                    uf_mass.columns = ["UF", "MASSA_ROTA"]
+                    st.info("📊 Exibindo massa total de RSU (dados da tabela de resíduos, pois 'MASSA_ROTA' não tem dados suficientes)")
                 else:
                     uf_mass = pd.DataFrame()
             
@@ -364,27 +345,49 @@ with tab4:
                 
                 if not uf_mass.empty:
                     try:
-                        fig_map = px.choropleth(
-                            uf_mass,
-                            locations="UF",
-                            locationmode="Brazil-states",
-                            color="MASSA_ROTA",
-                            hover_name="UF",
-                            title="Massa coletada por estado",
-                            color_continuous_scale="Greens",
-                            labels={"MASSA_ROTA": "Massa (t)"}
-                        )
-                        fig_map.update_geos(fitbounds="locations", visible=False)
-                        st.plotly_chart(fig_map, use_container_width=True)
+                        # Baixar GeoJSON do Brasil
+                        geojson_url = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson"
+                        response = requests.get(geojson_url, timeout=10)
+                        response.raise_for_status()
+                        geojson_data = response.json()
+                        
+                        # Mapear siglas para IDs (código IBGE)
+                        sigla_to_id = {}
+                        for feature in geojson_data['features']:
+                            props = feature['properties']
+                            sigla = props.get('sigla', '').upper()
+                            id_ = feature.get('id') or props.get('id')
+                            if sigla and id_:
+                                sigla_to_id[sigla] = str(id_)  # garantir string
+                        
+                        uf_mass['id'] = uf_mass['UF'].map(sigla_to_id)
+                        uf_mass = uf_mass.dropna(subset=['id'])
+                        
+                        if not uf_mass.empty:
+                            fig_map = px.choropleth(
+                                uf_mass,
+                                geojson=geojson_data,
+                                locations='id',
+                                color='MASSA_ROTA',
+                                hover_name='UF',
+                                title="Massa coletada por estado",
+                                color_continuous_scale="Greens",
+                                labels={"MASSA_ROTA": "Massa (t)"}
+                            )
+                            fig_map.update_geos(fitbounds="locations", visible=False)
+                            st.plotly_chart(fig_map, use_container_width=True)
+                        else:
+                            st.warning("Não foi possível mapear as siglas para os códigos do GeoJSON. Exibindo gráfico de barras.")
+                            fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
+                            st.plotly_chart(fig_bar, use_container_width=True)
                     except Exception as e:
-                        st.warning(f"Erro ao renderizar o mapa: {e}. Exibindo gráfico de barras.")
-                        fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False),
-                                         x="UF", y="MASSA_ROTA", title="Massa por estado")
+                        st.warning(f"Erro ao gerar mapa: {e}. Exibindo gráfico de barras.")
+                        fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
                         st.plotly_chart(fig_bar, use_container_width=True)
                 else:
                     st.info("Sem dados positivos para exibir no mapa (todos os valores são zero ou nulos).")
             else:
-                st.warning("Não foi possível encontrar uma coluna de massa para o mapa. Verifique os dados.")
+                st.warning("Não foi possível encontrar uma coluna de massa para o mapa.")
 
 # =========================================================
 # TAB 5 - COMPARAÇÃO 2023 vs 2024
