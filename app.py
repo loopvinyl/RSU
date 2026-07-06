@@ -206,10 +206,12 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # =========================================================
-# TAB 1 - VISÃO GERAL
+# TAB 1 - VISÃO GERAL (REFINADA)
 # =========================================================
 with tab1:
     st.header("📌 Visão Geral dos Dados")
+    
+    # Métricas principais
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total de municípios", df_res_filt.shape[0] if df_res_filt is not None else 0)
@@ -220,30 +222,82 @@ with tab1:
         if "POP_TOTAL" in df_res_filt.columns:
             pop_total = df_res_filt["POP_TOTAL"].sum()
             st.metric("População total", f"{pop_total:,.0f}".replace(",", "."))
+
+    # Indicadores avançados (gestão pública)
+    if df_res_filt is not None and not df_res_filt.empty:
+        st.markdown("---")
+        st.subheader("📊 Indicadores de Gestão")
+
+        # Geração per capita (kg/hab/dia)
+        if "MASSA_TOTAL_RSU" in df_res_filt.columns and "POP_TOTAL" in df_res_filt.columns:
+            massa_total = df_res_filt["MASSA_TOTAL_RSU"].sum()
+            pop_total = df_res_filt["POP_TOTAL"].sum()
+            if pop_total > 0:
+                per_capita_ano = massa_total / pop_total  # kg/hab/ano
+                per_capita_dia = per_capita_ano / 365  # kg/hab/dia
+                col1, col2 = st.columns(2)
+                col1.metric("Geração per capita (kg/hab/ano)", f"{per_capita_ano:.2f}")
+                col2.metric("Geração per capita (kg/hab/dia)", f"{per_capita_dia:.3f}")
+
+        # Taxa de cobertura da coleta seletiva
+        if "MASSA_SELETIVA" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
+            massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
+            if massa_total > 0:
+                taxa_cobertura = (massa_seletiva / massa_total) * 100
+                st.metric("Taxa de coleta seletiva (%)", f"{taxa_cobertura:.2f}%")
+
+        # Ranking: município com maior e menor massa
+        if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
+            df_rank = df_res_filt.dropna(subset=["MASSA_TOTAL_RSU"])
+            if not df_rank.empty:
+                maior = df_rank.loc[df_rank["MASSA_TOTAL_RSU"].idxmax()]
+                menor = df_rank.loc[df_rank["MASSA_TOTAL_RSU"].idxmin()]
+                col1, col2 = st.columns(2)
+                col1.metric(
+                    "🏆 Maior massa",
+                    f"{maior['MUNICIPIO']} ({maior['UF']})",
+                    f"{maior['MASSA_TOTAL_RSU']:,.0f} t".replace(",", ".")
+                )
+                col2.metric(
+                    "📉 Menor massa",
+                    f"{menor['MUNICIPIO']} ({menor['UF']})",
+                    f"{menor['MASSA_TOTAL_RSU']:,.0f} t".replace(",", ".")
+                )
+
     st.markdown("---")
+    
+    # Gráfico 1: Distribuição de municípios por UF
     if "UF" in df_res_filt.columns:
         uf_counts = df_res_filt["UF"].value_counts().reset_index()
         uf_counts.columns = ["UF", "Quantidade"]
         fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
-                        color="Quantidade", color_continuous_scale="Blues")
-        fig_uf.update_layout(xaxis_tickangle=45)
+                        color="Quantidade", color_continuous_scale="Blues",
+                        height=500)
+        fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_uf, use_container_width=True)
+
+    # Gráfico 2: Distribuição de população (histograma)
     if "POP_TOTAL" in df_res_filt.columns:
         fig_pop = px.histogram(df_res_filt, x="POP_TOTAL", nbins=50, 
                                title="Distribuição da população dos municípios",
                                labels={"POP_TOTAL": "População"},
-                               color_discrete_sequence=["#2E86C1"])
+                               color_discrete_sequence=["#2E86C1"],
+                               height=500)
         st.plotly_chart(fig_pop, use_container_width=True)
+
+    # Gráfico 3: Massa total de RSU por UF (top 10)
     if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
         uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
         uf_massa = uf_massa.sort_values("MASSA_TOTAL_RSU", ascending=False).head(10)
         fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
                            labels={"MASSA_TOTAL_RSU": "Massa (t)"},
-                           color="MASSA_TOTAL_RSU", color_continuous_scale="Greens")
+                           color="MASSA_TOTAL_RSU", color_continuous_scale="Greens",
+                           height=500)
+        fig_massa.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_massa, use_container_width=True)
 
 # =========================================================
-# TAB 2 - MUNICÍPIOS
+# TAB 2 - MUNICÍPIOS (REFINADA)
 # =========================================================
 with tab2:
     st.header("🏙️ Análise por Município")
@@ -259,17 +313,20 @@ with tab2:
             for col in df_tab.columns:
                 if col not in ["MUNICIPIO", "UF", "MACRO"]:
                     df_tab[col] = df_tab[col].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "")
-            st.dataframe(df_tab, use_container_width=True, height=500)
+            st.dataframe(df_tab, use_container_width=True, height=400, hide_index=True)
+
+        # Gráfico de dispersão: População vs Massa de RSU
         if "POP_TOTAL" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
             fig_scatter = px.scatter(df_res_filt, x="POP_TOTAL", y="MASSA_TOTAL_RSU", 
                                      hover_data=["MUNICIPIO", "UF"],
                                      title="Relação População vs Massa de RSU",
                                      labels={"POP_TOTAL": "População", "MASSA_TOTAL_RSU": "Massa (t)"},
-                                     color="UF" if "UF" in df_res_filt.columns else None)
+                                     color="UF" if "UF" in df_res_filt.columns else None,
+                                     height=500)
             st.plotly_chart(fig_scatter, use_container_width=True)
 
 # =========================================================
-# TAB 3 - ROTAS DE COLETA
+# TAB 3 - ROTAS DE COLETA (REFINADA)
 # =========================================================
 with tab3:
     st.header("🚚 Análise das Rotas de Coleta")
@@ -280,24 +337,29 @@ with tab3:
             col2.metric("Massa total nas rotas", f"{df_col_filt['MASSA_ROTA'].sum():,.0f} t".replace(",", "."))
         if "TIPO_COLETA" in df_col_filt.columns:
             col3.metric("Tipos de coleta distintos", df_col_filt["TIPO_COLETA"].nunique())
+
         if "TIPO_COLETA" in df_col_filt.columns:
             freq = df_col_filt["TIPO_COLETA"].value_counts().reset_index()
             freq.columns = ["Tipo", "Quantidade"]
             fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
-                              color="Quantidade", color_continuous_scale="Viridis")
-            fig_freq.update_layout(xaxis_tickangle=45)
+                              color="Quantidade", color_continuous_scale="Viridis",
+                              height=500)
+            fig_freq.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             st.plotly_chart(fig_freq, use_container_width=True)
+
         if "MASSA_ROTA" in df_col_filt.columns and "TIPO_COLETA" in df_col_filt.columns:
             mass_tipo = df_col_filt.groupby("TIPO_COLETA")["MASSA_ROTA"].sum().reset_index()
             mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
             fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
-                             title="Massa coletada por tipo de coleta", hole=0.4)
+                             title="Massa coletada por tipo de coleta", hole=0.4,
+                             height=500)
             st.plotly_chart(fig_pie, use_container_width=True)
+
         st.subheader("🔍 Amostra das rotas")
-        st.dataframe(df_col_filt.head(100), use_container_width=True)
+        st.dataframe(df_col_filt.head(100), use_container_width=True, height=300, hide_index=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (SEM MAPA, APENAS BARRAS)
+# TAB 4 - DESTINAÇÃO (REFINADA, SEM MAPA)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -311,24 +373,24 @@ with tab4:
                 fig_dest = px.bar(mass_dest, x="TIPO_DESTINO", y="MASSA_ROTA", 
                                   title="Massa destinada por tipo (dados de coleta)",
                                   labels={"MASSA_ROTA": "Massa (t)"},
-                                  color="MASSA_ROTA", color_continuous_scale="Viridis")
-                fig_dest.update_layout(xaxis_tickangle=45)
+                                  color="MASSA_ROTA", color_continuous_scale="Viridis",
+                                  height=500)
+                fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig_dest, use_container_width=True)
             else:
                 fig_dest = px.pie(destinos, values="Quantidade", names="Destino",
-                                  title="Distribuição dos tipos de destino (contagem de rotas)")
+                                  title="Distribuição dos tipos de destino (contagem de rotas)",
+                                  height=500)
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # ========== DISTRIBUIÇÃO POR ESTADO (GRAFICO DE BARRAS) ==========
+        # Distribuição por Estado (gráfico de barras)
         st.subheader("📊 Distribuição da Massa por Estado")
         
-        # Preparar dados agregados por UF
         if "MASSA_ROTA" in df_col_filt.columns:
             uf_mass = df_col_filt.groupby("UF")["MASSA_ROTA"].sum().reset_index()
         else:
             uf_mass = pd.DataFrame()
         
-        # Fallback para MASSA_TOTAL_RSU
         if uf_mass.empty or uf_mass["MASSA_ROTA"].sum() == 0:
             if "MASSA_TOTAL_RSU" in df_res_filt.columns and "UF" in df_res_filt.columns:
                 uf_mass = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
@@ -348,8 +410,10 @@ with tab4:
                     title="Massa coletada por estado",
                     labels={"MASSA_ROTA": "Massa (t)"},
                     color="MASSA_ROTA",
-                    color_continuous_scale="Viridis"
+                    color_continuous_scale="Viridis",
+                    height=500
                 )
+                fig_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.info("Todos os valores de massa são zero ou nulos. Não há dados para exibir.")
@@ -357,10 +421,11 @@ with tab4:
             st.warning("Não foi possível encontrar uma coluna de massa para a análise.")
 
 # =========================================================
-# TAB 5 - COMPARAÇÃO 2023 vs 2024
+# TAB 5 - COMPARAÇÃO 2023 vs 2024 (REFINADA)
 # =========================================================
 with tab5:
     st.header("📈 Comparação entre 2023 e 2024")
+    
     def get_metric(df, col):
         if df is not None and col in df.columns:
             return df[col].sum()
@@ -375,20 +440,28 @@ with tab5:
         "2024": get_metric(df_res_2024, "POP_TOTAL")
     }
     
+    # Indicadores de evolução
+    if not np.isnan(massas["2023"]) and not np.isnan(massas["2024"]) and massas["2023"] > 0:
+        var_massa = ((massas["2024"] - massas["2023"]) / massas["2023"]) * 100
+        st.metric("Variação da massa total", f"{var_massa:+.2f}%")
+    
     col1, col2 = st.columns(2)
     with col1:
         fig_massa = px.bar(x=list(massas.keys()), y=list(massas.values()),
                            title="Massa total de RSU (t)",
                            labels={"x": "Ano", "y": "Massa (t)"},
                            color=list(massas.keys()),
-                           color_discrete_sequence=["#1f77b4", "#ff7f0e"])
+                           color_discrete_sequence=["#1f77b4", "#ff7f0e"],
+                           height=500)
         st.plotly_chart(fig_massa, use_container_width=True)
+
     with col2:
         fig_pop = px.bar(x=list(pops.keys()), y=list(pops.values()),
                          title="População total",
                          labels={"x": "Ano", "y": "População"},
                          color=list(pops.keys()),
-                         color_discrete_sequence=["#2ca02c", "#d62728"])
+                         color_discrete_sequence=["#2ca02c", "#d62728"],
+                         height=500)
         st.plotly_chart(fig_pop, use_container_width=True)
     
     if "TIPO_COLETA" in df_col_2023.columns and "TIPO_COLETA" in df_col_2024.columns:
@@ -401,7 +474,8 @@ with tab5:
         fig_comp = go.Figure()
         fig_comp.add_trace(go.Bar(x=freq_comp["Tipo"], y=freq_comp["2023"], name="2023", marker_color="#1f77b4"))
         fig_comp.add_trace(go.Bar(x=freq_comp["Tipo"], y=freq_comp["2024"], name="2024", marker_color="#ff7f0e"))
-        fig_comp.update_layout(title="Comparação de tipos de coleta", xaxis_tickangle=45, barmode="group")
+        fig_comp.update_layout(title="Comparação de tipos de coleta", xaxis_tickangle=45, barmode="group",
+                               height=500, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_comp, use_container_width=True)
 
 # =========================================================
