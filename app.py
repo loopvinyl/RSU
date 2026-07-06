@@ -298,7 +298,7 @@ with tab3:
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO - ESCALA DE CORES AJUSTADA)
+# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO COM ESCALA AJUSTADA)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -364,15 +364,14 @@ with tab4:
                         uf_mass = uf_mass.dropna(subset=['id'])
                         
                         if not uf_mass.empty:
-                            # --- AJUSTE DA ESCALA DE CORES ---
-                            # Calcular percentis para definir o range_color
+                            # --- AJUSTE DA ESCALA DE CORES USANDO PERCENTIL 95 ---
                             mass_vals = uf_mass["MASSA_ROTA"]
-                            # Usa percentil 95 como máximo para evitar distorção por outliers
-                            max_val = mass_vals.quantile(0.95) if len(mass_vals) > 1 else mass_vals.max()
-                            min_val = 0  # mínimo fixo em 0
-                            
-                            # Paleta com bom contraste (pode trocar para "Reds", "YlOrRd", "Blues", "Greens")
-                            color_scale = "Reds"
+                            # Define o máximo como o percentil 95 para evitar outliers
+                            p95 = mass_vals.quantile(0.95) if len(mass_vals) > 1 else mass_vals.max()
+                            # Garante que o mínimo seja 0
+                            min_val = 0
+                            # Paleta com bom contraste (YlOrRd: amarelo para valores baixos, vermelho para altos)
+                            color_scale = "YlOrRd"
                             
                             fig_map = px.choropleth(
                                 uf_mass,
@@ -382,11 +381,14 @@ with tab4:
                                 hover_name='UF',
                                 title="Massa coletada por estado",
                                 color_continuous_scale=color_scale,
-                                range_color=(min_val, max_val),  # LIMITA O RANGE PARA MELHOR CONTRASTE
+                                range_color=(min_val, p95),  # LIMITA A ESCALA
                                 labels={"MASSA_ROTA": "Massa (t)"}
                             )
                             fig_map.update_geos(fitbounds="locations", visible=False)
                             st.plotly_chart(fig_map, use_container_width=True)
+                            
+                            # Exibe informação sobre o limite da escala
+                            st.caption(f"🔹 Escala ajustada: máximo = {p95:,.0f} t (percentil 95). Estado com valor acima aparece na cor mais escura.")
                         else:
                             st.warning("Não foi possível mapear as siglas para os IDs do GeoJSON. Exibindo gráfico de barras.")
                             fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
