@@ -298,7 +298,7 @@ with tab3:
         st.dataframe(df_col_filt.head(100), use_container_width=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO COM ESCALA LOGARÍTMICA)
+# TAB 4 - DESTINAÇÃO (COM MAPA COROPLÉTICO CORRIGIDO)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -320,7 +320,7 @@ with tab4:
                                   title="Distribuição dos tipos de destino (contagem de rotas)")
                 st.plotly_chart(fig_dest, use_container_width=True)
 
-        # ========== MAPA COROPLÉTICO COM ESCALA LOGARÍTMICA ==========
+        # ========== MAPA COROPLÉTICO (CORRIGIDO - SEM LOG) ==========
         if "UF" in df_col_filt.columns:
             st.subheader("🗺️ Mapa da Massa Coletada por Estado")
             
@@ -340,6 +340,7 @@ with tab4:
                     uf_mass = pd.DataFrame()
             
             if not uf_mass.empty:
+                # Remove valores nulos e zero
                 uf_mass = uf_mass.dropna(subset=["UF", "MASSA_ROTA"])
                 uf_mass = uf_mass[uf_mass["MASSA_ROTA"] > 0]
                 
@@ -364,54 +365,32 @@ with tab4:
                         uf_mass = uf_mass.dropna(subset=['id'])
                         
                         if not uf_mass.empty:
-                            # ----- SOLUÇÃO DEFINITIVA: ESCALA LOGARÍTMICA -----
-                            # Criar uma coluna com o log10 da massa para a cor
-                            # Isso distribui melhor os valores em várias ordens de grandeza
-                            uf_mass['log_massa'] = np.log10(uf_mass['MASSA_ROTA'])
+                            # --- CORREÇÃO: escala linear com corte no percentil 90 ---
+                            mass_vals = uf_mass["MASSA_ROTA"]
+                            # Define o máximo como o percentil 90 (elimina outliers extremos)
+                            p90 = mass_vals.quantile(0.90) if len(mass_vals) > 1 else mass_vals.max()
+                            min_val = 0
                             
-                            # Definir a paleta com cores fortes
+                            # Paleta com forte contraste (vermelhos)
                             color_scale = "Reds"
                             
-                            # Construir o mapa com a coluna log
                             fig_map = px.choropleth(
                                 uf_mass,
                                 geojson=geojson_data,
                                 locations='id',
-                                color='log_massa',  # <-- usando a escala log
+                                color='MASSA_ROTA',
                                 hover_name='UF',
-                                hover_data={'MASSA_ROTA': ':.0f', 'log_massa': False},  # mostra massa real no hover
-                                title="Massa coletada por estado (escala logarítmica)",
+                                title="Massa coletada por estado",
                                 color_continuous_scale=color_scale,
-                                labels={"log_massa": "Massa (t) - escala log"}
+                                range_color=(min_val, p90),  # CORTE NO PERCENTIL 90
+                                labels={"MASSA_ROTA": "Massa (t)"}
                             )
-                            
-                            # Ajustar o formato da colorbar para mostrar valores reais (em milhões)
-                            # A colorbar mostrará os valores de log, mas podemos customizar os ticks
-                            # Vamos calcular os ticks em log e mostrar os valores reais
-                            log_vals = uf_mass['log_massa'].sort_values()
-                            min_log = log_vals.min()
-                            max_log = log_vals.max()
-                            # Criar ticks de log em intervalos razoáveis
-                            ticks_log = np.linspace(min_log, max_log, 6)
-                            # Converter ticks para valores reais
-                            tick_vals = [10**t for t in ticks_log]
-                            # Formatar como milhões ou inteiros
-                            tick_text = [f"{v/1e6:.1f}M" if v >= 1e6 else f"{v:,.0f}" for v in tick_vals]
-                            
-                            fig_map.update_coloraxes(
-                                colorbar=dict(
-                                    tickvals=ticks_log,
-                                    ticktext=tick_text,
-                                    title="Massa (t)"
-                                )
-                            )
-                            
                             fig_map.update_geos(fitbounds="locations", visible=False)
                             st.plotly_chart(fig_map, use_container_width=True)
                             
-                            st.caption("🔹 Escala logarítmica aplicada para melhor visualizar a variação entre estados. Valores na legenda estão em toneladas (M = milhões).")
+                            st.caption(f"🔹 Escala ajustada: máximo = {p90:,.0f} t (percentil 90). Estados com valores acima aparecem na cor mais escura.")
                         else:
-                            st.warning("Não foi possível mapear as siglas para os IDs do GeoJSON. Exibindo gráfico de barras.")
+                            st.warning("Não foi possível mapear as siglas. Exibindo gráfico de barras.")
                             fig_bar = px.bar(uf_mass.sort_values("MASSA_ROTA", ascending=False), x="UF", y="MASSA_ROTA", title="Massa por estado")
                             st.plotly_chart(fig_bar, use_container_width=True)
                     except Exception as e:
