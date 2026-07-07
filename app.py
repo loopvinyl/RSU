@@ -478,16 +478,15 @@ with tab4:
                     fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                     st.plotly_chart(fig_dest, use_container_width=True)
                 
-                # Gráfico de percentual (ADICIONADO AQUI)
+                # Gráfico de percentual (CORRIGIDO)
                 st.markdown("**Percentual da massa destinada por tipo.** Este gráfico mostra a distribuição percentual da massa total encaminhada para cada destino. Facilita a comparação relativa entre as diferentes formas de destinação, independentemente do volume absoluto.")
                 mass_dest['Percentual'] = (mass_dest['MASSA_ROTA'] / mass_dest['MASSA_ROTA'].sum()) * 100
                 fig_perc = px.bar(mass_dest, x="TIPO_DESTINO", y="Percentual",
                                   title="Percentual da massa destinada por tipo",
                                   labels={"Percentual": "Percentual (%)", "TIPO_DESTINO": "Tipo de Destino"},
                                   color="Percentual", color_continuous_scale="Viridis", height=500)
-                aplicar_formatacao(fig_perc)
                 if fig_perc is not None:
-                    fig_perc.update_yaxis(tickformat='.1f')  # Exibe uma casa decimal no eixo Y
+                    fig_perc.update_layout(yaxis_tickformat='.1f')
                     fig_perc.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                     st.plotly_chart(fig_perc, use_container_width=True)
             else:
