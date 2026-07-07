@@ -216,11 +216,10 @@ if "POP_TOTAL" in df_res.columns:
                                   max_value=pop_max//1000,
                                   value=(max(0, pop_min//1000), pop_max//1000))
     st.sidebar.caption(
-        "📌 **Como usar:** Mova os limites do controle deslizante para definir a faixa de população (em milhares de habitantes) "
-        "dos municípios que você deseja analisar. O limite inferior mínimo e o superior máximo são calculados automaticamente "
-        "com base nos dados carregados. Ao estreitar o intervalo, apenas os municípios com população dentro da faixa selecionada "
-        "serão considerados nos indicadores, tabelas e gráficos – o que permite focar, por exemplo, apenas em cidades de médio "
-        "ou grande porte."
+        "📌 **Como usar:** mova os limites do controle deslizante para selecionar a faixa de população (em milhares de habitantes) "
+        "dos municípios que você deseja analisar. Os valores mínimo e máximo são definidos automaticamente com base nos dados "
+        "carregados. Ao reduzir o intervalo, apenas os municípios com população dentro da faixa escolhida serão considerados nos "
+        "indicadores, tabelas e gráficos, o que permite, por exemplo, analisar exclusivamente cidades de médio ou grande porte."
     )
     pop_min_filt = pop_range[0] * 1000
     pop_max_filt = pop_range[1] * 1000
@@ -330,9 +329,9 @@ with tab1:
 
     st.markdown("---")
     
-    # Explicação do gráfico de barras por UF
+    # Texto explicativo para gráfico de barras por UF (sem travessão)
     if "UF" in df_res_filt.columns:
-        st.markdown("**Distribuição dos municípios por estado** – Este gráfico mostra quantos municípios estão presentes na base de dados para cada Unidade Federativa. Permite identificar a cobertura do SNIS e eventuais discrepâncias regionais.")
+        st.markdown("**Distribuição dos municípios por estado.** Este gráfico mostra quantos municípios estão presentes na base de dados para cada Unidade Federativa. Permite identificar a cobertura do SNIS e eventuais discrepâncias regionais.")
         uf_counts = df_res_filt["UF"].value_counts().reset_index()
         uf_counts.columns = ["UF", "Quantidade"]
         fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
@@ -342,9 +341,9 @@ with tab1:
             fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             st.plotly_chart(fig_uf, use_container_width=True)
 
-    # Explicação do histograma de população
+    # Texto explicativo para histograma de população (sem travessão)
     if "POP_TOTAL" in df_res_filt.columns:
-        st.markdown("**Distribuição da população dos municípios** – O histograma agrupa os municípios por faixas de população. Ajuda a entender se a base é composta majoritariamente por municípios pequenos, médios ou grandes, influenciando a interpretação de médias per capita.")
+        st.markdown("**Distribuição da população dos municípios.** O histograma agrupa os municípios por faixas de população. Ajuda a entender se a base é composta majoritariamente por municípios pequenos, médios ou grandes, influenciando a interpretação de médias per capita.")
         fig_pop = px.histogram(df_res_filt, x="POP_TOTAL", nbins=50, 
                                title="Distribuição da população dos municípios",
                                labels={"POP_TOTAL": "População"},
@@ -353,9 +352,9 @@ with tab1:
         if fig_pop is not None:
             st.plotly_chart(fig_pop, use_container_width=True)
 
-    # Explicação do Top 10 UFs por massa
+    # Texto explicativo para Top 10 UFs por massa (sem travessão)
     if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
-        st.markdown("**Top 10 estados com maior massa de RSU** – Agrega a massa total de resíduos sólidos urbanos declarada por município, somando por estado. Reflete tanto o tamanho da população quanto a intensidade da geração de resíduos em cada UF.")
+        st.markdown("**Top 10 estados com maior massa de RSU.** Agrega a massa total de resíduos sólidos urbanos declarada por município, somando por estado. Reflete tanto o tamanho da população quanto a intensidade da geração de resíduos em cada UF.")
         uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
         uf_massa = uf_massa.sort_values("MASSA_TOTAL_RSU", ascending=False).head(10)
         fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
@@ -379,16 +378,16 @@ with tab2:
             default=[c for c in ["MUNICIPIO", "UF", "POP_TOTAL", "MASSA_TOTAL_RSU", "MASSA_SELETIVA"] if c in cols_disponiveis]
         )
         if cols_para_exibir:
-            st.markdown("**Dados municipais** – Tabela interativa com as colunas selecionadas. Use-a para explorar os valores brutos de cada município, ordenar e filtrar visualmente. Os números são exibidos com separador de milhar brasileiro.")
+            st.markdown("**Dados municipais.** Tabela interativa com as colunas selecionadas. Use-a para explorar os valores brutos de cada município, ordenar e filtrar visualmente. Os números são exibidos com separador de milhar brasileiro.")
             df_tab = df_res_filt[cols_para_exibir].copy()
             for col in df_tab.columns:
                 if col not in ["MUNICIPIO", "UF", "MACRO"]:
                     df_tab[col] = df_tab[col].apply(lambda x: formatar_metric(x, 0) if pd.notna(x) else "")
             st.dataframe(df_tab, use_container_width=True, height=400, hide_index=True)
 
-        # Explicação do gráfico de dispersão
+        # Texto explicativo para gráfico de dispersão (sem travessão)
         if "POP_TOTAL" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
-            st.markdown("**População × Massa de RSU** – Cada ponto representa um município. A relação esperada é positiva (mais habitantes geram mais resíduos). Pontos muito afastados da tendência podem indicar erros de declaração ou particularidades locais.")
+            st.markdown("**População × Massa de RSU.** Cada ponto representa um município. A relação esperada é positiva (mais habitantes geram mais resíduos). Pontos muito afastados da tendência podem indicar erros de declaração ou particularidades locais.")
             fig_scatter = px.scatter(df_res_filt, x="POP_TOTAL", y="MASSA_TOTAL_RSU", 
                                      hover_data=["MUNICIPIO", "UF"],
                                      title="Relação População vs Massa de RSU",
@@ -412,7 +411,7 @@ with tab3:
             col3.metric("Tipos de coleta distintos", df_col_filt["TIPO_COLETA"].nunique())
 
         if "TIPO_COLETA" in df_col_filt.columns:
-            st.markdown("**Frequência dos tipos de coleta** – Mostra quantas rotas são classificadas em cada categoria (ex.: coleta domiciliar, seletiva, etc.). Reflete a diversidade ou predominância de certos modelos de coleta no conjunto de dados.")
+            st.markdown("**Frequência dos tipos de coleta.** Mostra quantas rotas são classificadas em cada categoria (ex.: coleta domiciliar, seletiva, etc.). Reflete a diversidade ou predominância de certos modelos de coleta no conjunto de dados.")
             freq = df_col_filt["TIPO_COLETA"].value_counts().reset_index()
             freq.columns = ["Tipo", "Quantidade"]
             fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
@@ -423,7 +422,7 @@ with tab3:
                 st.plotly_chart(fig_freq, use_container_width=True)
 
         if "MASSA_ROTA" in df_col_filt.columns and "TIPO_COLETA" in df_col_filt.columns:
-            st.markdown("**Massa coletada por tipo de coleta** – O gráfico de rosca revela a participação de cada tipo de coleta na massa total registrada. A coleta domiciliar (convencional) costuma dominar; a fatia da coleta seletiva indica o avanço da reciclagem.")
+            st.markdown("**Massa coletada por tipo de coleta.** O gráfico de rosca revela a participação de cada tipo de coleta na massa total registrada. A coleta domiciliar (convencional) costuma dominar; a fatia da coleta seletiva indica o avanço da reciclagem.")
             mass_tipo = df_col_filt.groupby("TIPO_COLETA")["MASSA_ROTA"].sum().reset_index()
             mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
             fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
@@ -432,7 +431,7 @@ with tab3:
                 st.plotly_chart(fig_pie, use_container_width=True)
 
         st.subheader("🔍 Amostra das rotas")
-        st.markdown("**Amostra de 100 rotas** – Visualização parcial da tabela de rotas de coleta. Útil para inspecionar dados brutos, verificar preenchimento e consistência dos campos. Colunas numéricas são formatadas no padrão brasileiro.")
+        st.markdown("**Amostra de 100 rotas.** Visualização parcial da tabela de rotas de coleta. Útil para inspecionar dados brutos, verificar preenchimento e consistência dos campos. Colunas numéricas são formatadas no padrão brasileiro.")
         df_amostra = df_col_filt.head(100).copy()
         for col in df_amostra.columns:
             if col not in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO"]:
@@ -467,7 +466,7 @@ with tab4:
             destinos = df_destino["TIPO_DESTINO"].value_counts().reset_index()
             destinos.columns = ["Destino", "Quantidade"]
             if "MASSA_ROTA" in df_destino.columns:
-                st.markdown("**Massa destinada por tipo de destino** – Exibe a quantidade de resíduos (em toneladas) encaminhada para cada tipo de unidade (aterro, lixão, reciclagem, etc.). A exclusão de transbordos evita que a mesma carga seja contada múltiplas vezes.")
+                st.markdown("**Massa destinada por tipo de destino.** Exibe a quantidade de resíduos (em toneladas) encaminhada para cada tipo de unidade (aterro, lixão, reciclagem, etc.). A exclusão de transbordos evita que a mesma carga seja contada múltiplas vezes.")
                 mass_dest = df_destino.groupby("TIPO_DESTINO")["MASSA_ROTA"].sum().reset_index()
                 mass_dest = mass_dest.sort_values("MASSA_ROTA", ascending=False)
                 fig_dest = px.bar(mass_dest, x="TIPO_DESTINO", y="MASSA_ROTA", 
@@ -504,7 +503,7 @@ with tab4:
             uf_mass = uf_mass.dropna(subset=["UF", "MASSA_ROTA"])
             uf_mass = uf_mass[uf_mass["MASSA_ROTA"] > 0]
             if not uf_mass.empty:
-                st.markdown("**Massa coletada por estado (destinação)** – Agregação da massa por UF, permitindo comparar o volume total de resíduos que chega aos destinos finais em cada estado. Pode diferir dos totais da aba Visão Geral quando se usam fontes de dados distintas (tabela de resíduos vs. coleta).")
+                st.markdown("**Massa coletada por estado (destinação).** Agregação da massa por UF, permitindo comparar o volume total de resíduos que chega aos destinos finais em cada estado. Pode diferir dos totais da aba Visão Geral quando se usam fontes de dados distintas (tabela de resíduos vs. coleta).")
                 fig_bar = px.bar(
                     uf_mass.sort_values("MASSA_ROTA", ascending=False),
                     x="UF",
@@ -558,7 +557,7 @@ with tab5:
     
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**Massa total de RSU por ano** – Comparação direta da soma nacional (ou filtrada) da massa de resíduos. A variação pode refletir mudanças populacionais, econômicas ou de cobertura da base de dados.")
+        st.markdown("**Massa total de RSU por ano.** Comparação direta da soma nacional (ou filtrada) da massa de resíduos. A variação pode refletir mudanças populacionais, econômicas ou de cobertura da base de dados.")
         fig_massa = px.bar(x=list(massas.keys()), y=list(massas.values()),
                            title="Massa total de RSU (t)",
                            labels={"x": "Ano", "y": "Massa (t)"},
@@ -570,7 +569,7 @@ with tab5:
             st.plotly_chart(fig_massa, use_container_width=True)
 
     with col2:
-        st.markdown("**População total por ano** – Evolução do somatório da população dos municípios da base. Alterações podem decorrer de crescimento vegetativo, migração ou simplesmente de diferenças na quantidade de municípios declarantes entre os anos.")
+        st.markdown("**População total por ano.** Evolução do somatório da população dos municípios da base. Alterações podem decorrer de crescimento vegetativo, migração ou simplesmente de diferenças na quantidade de municípios declarantes entre os anos.")
         fig_pop = px.bar(x=list(pops.keys()), y=list(pops.values()),
                          title="População total",
                          labels={"x": "Ano", "y": "População"},
@@ -583,7 +582,7 @@ with tab5:
     
     if "TIPO_COLETA" in df_col_2023.columns and "TIPO_COLETA" in df_col_2024.columns:
         st.subheader("📋 Evolução dos Tipos de Coleta")
-        st.markdown("**Comparação da quantidade de rotas por tipo entre 2023 e 2024** – Permite identificar mudanças na estrutura de coleta, como aumento de rotas seletivas ou alterações na classificação dos serviços.")
+        st.markdown("**Comparação da quantidade de rotas por tipo entre 2023 e 2024.** Permite identificar mudanças na estrutura de coleta, como aumento de rotas seletivas ou alterações na classificação dos serviços.")
         freq_2023 = df_col_2023["TIPO_COLETA"].value_counts().reset_index()
         freq_2023.columns = ["Tipo", "2023"]
         freq_2024 = df_col_2024["TIPO_COLETA"].value_counts().reset_index()
