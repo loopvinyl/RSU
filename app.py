@@ -215,6 +215,13 @@ if "POP_TOTAL" in df_res.columns:
                                   min_value=max(0, pop_min//1000), 
                                   max_value=pop_max//1000,
                                   value=(max(0, pop_min//1000), pop_max//1000))
+    st.sidebar.caption(
+        "📌 **Como usar:** Mova os limites do controle deslizante para definir a faixa de população (em milhares de habitantes) "
+        "dos municípios que você deseja analisar. O limite inferior mínimo e o superior máximo são calculados automaticamente "
+        "com base nos dados carregados. Ao estreitar o intervalo, apenas os municípios com população dentro da faixa selecionada "
+        "serão considerados nos indicadores, tabelas e gráficos – o que permite focar, por exemplo, apenas em cidades de médio "
+        "ou grande porte."
+    )
     pop_min_filt = pop_range[0] * 1000
     pop_max_filt = pop_range[1] * 1000
 else:
