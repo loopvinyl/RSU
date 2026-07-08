@@ -270,13 +270,15 @@ with tab1:
         st.markdown("---")
         st.subheader("📊 Indicadores de Gestão")
 
-        # Geração per capita (com explicação)
+        # Geração per capita (com explicação) - CORREÇÃO APLICADA AQUI
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "POP_TOTAL" in df_res_filt.columns:
-            massa_total = df_res_filt["MASSA_TOTAL_RSU"].sum()
+            massa_total_ton = df_res_filt["MASSA_TOTAL_RSU"].sum()
             pop_total = df_res_filt["POP_TOTAL"].sum()
             if pop_total > 0:
-                per_capita_ano = massa_total / pop_total
-                per_capita_dia = per_capita_ano / 365
+                # CONVERTE TONELADAS PARA QUILOGRAMAS ANTES DE DIVIDIR
+                massa_total_kg = massa_total_ton * 1000
+                per_capita_ano = massa_total_kg / pop_total          # kg/hab/ano
+                per_capita_dia = per_capita_ano / 365                # kg/hab/dia
                 col1, col2 = st.columns(2)
                 col1.metric(
                     "Geração per capita (kg/hab/ano)",
@@ -284,7 +286,7 @@ with tab1:
                     help="Calculado como: Massa total de RSU (kg) / População total. Fonte: SNIS."
                 )
                 col1.caption("📌 **Fórmula:** Massa total (kg) ÷ População total = kg/hab/ano")
-                col1.caption(f"📌 **Dados usados:** Massa total = {formatar_metric(massa_total, 0)} t = {formatar_metric(massa_total*1000, 0)} kg; População = {formatar_metric(pop_total, 0)} hab")
+                col1.caption(f"📌 **Dados usados:** Massa total = {formatar_metric(massa_total_ton, 0)} t = {formatar_metric(massa_total_kg, 0)} kg; População = {formatar_metric(pop_total, 0)} hab")
 
                 col2.metric(
                     "Geração per capita (kg/hab/dia)",
@@ -297,15 +299,15 @@ with tab1:
         # Taxa de coleta seletiva
         if "MASSA_SELETIVA" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
             massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
-            if massa_total > 0:
-                taxa_cobertura = (massa_seletiva / massa_total) * 100
+            if massa_total_ton > 0:
+                taxa_cobertura = (massa_seletiva / massa_total_ton) * 100
                 st.metric(
                     "Taxa de coleta seletiva (%)",
                     formatar_metric(taxa_cobertura, 2),
                     help="Percentual da massa total que é coletada seletivamente. Fonte: SNIS."
                 )
                 st.caption("📌 **Fórmula:** (Massa coletada seletivamente ÷ Massa total de RSU) × 100")
-                st.caption(f"📌 **Dados:** Massa seletiva = {formatar_metric(massa_seletiva, 0)} t; Massa total = {formatar_metric(massa_total, 0)} t")
+                st.caption(f"📌 **Dados:** Massa seletiva = {formatar_metric(massa_seletiva, 0)} t; Massa total = {formatar_metric(massa_total_ton, 0)} t")
 
         # Ranking de maior e menor massa
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
