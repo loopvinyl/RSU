@@ -250,7 +250,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # =========================================================
-# TAB 1 - VISÃO GERAL (REFINADA)
+# TAB 1 - VISÃO GERAL (COM OPÇÃO DE EXCLUIR TRANSBORDO)
 # =========================================================
 with tab1:
     st.header("📌 Visão Geral dos Dados")
@@ -268,48 +268,92 @@ with tab1:
 
     if df_res_filt is not None and not df_res_filt.empty:
         st.markdown("---")
+        
+        # ===== NOVO: checkbox para excluir transbordo nos indicadores =====
+        usar_dados_coleta = st.checkbox(
+            "Excluir transbordos dos indicadores (usar dados das rotas de coleta)",
+            value=False,
+            help="Quando ativado, os indicadores são calculados a partir das rotas de coleta, excluindo destinos do tipo 'Transbordo' para evitar dupla contagem."
+        )
+        st.markdown("---")
+
         st.subheader("📊 Indicadores de Gestão")
 
-        # Geração per capita (com explicação) - CORREÇÃO APLICADA AQUI
-        if "MASSA_TOTAL_RSU" in df_res_filt.columns and "POP_TOTAL" in df_res_filt.columns:
-            massa_total_ton = df_res_filt["MASSA_TOTAL_RSU"].sum()
-            pop_total = df_res_filt["POP_TOTAL"].sum()
-            if pop_total > 0:
-                # CONVERTE TONELADAS PARA QUILOGRAMAS ANTES DE DIVIDIR
-                massa_total_kg = massa_total_ton * 1000
-                per_capita_ano = massa_total_kg / pop_total          # kg/hab/ano
-                per_capita_dia = per_capita_ano / 365                # kg/hab/dia
-                col1, col2 = st.columns(2)
-                col1.metric(
+        # --- Determinação das massas conforme a escolha ---
+        if usar_dados_coleta and df_col_filt is not None and not df_col_filt.empty:
+            # Usa dados das rotas de coleta, excluindo transbordo
+            df_rotas = df_col_filt.copy()
+            if "TIPO_DESTINO" in df_rotas.columns:
+                df_rotas['destino_norm'] = df_rotas['TIPO_DESTINO'].astype(str).apply(
+                    lambda x: unicodedata.normalize('NFKD', x).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
+                    if pd.notna(x) else ''
+                )
+                df_rotas = df_rotas[~df_rotas['destino_norm'].str.contains('TRANSBORDO', na=False)]
+                df_rotas = df_rotas.drop(columns=['destino_norm'])
+
+            if "MASSA_ROTA" in df_rotas.columns:
+                massa_total_ton = df_rotas["MASSA_ROTA"].sum()
+                # Massa seletiva: rotas cujo tipo de coleta contenha "seletiva"
+                if "TIPO_COLETA" in df_rotas.columns:
+                    mask_seletiva = df_rotas["TIPO_COLETA"].astype(str).str.contains("seletiva", case=False, na=False)
+                    massa_seletiva = df_rotas.loc[mask_seletiva, "MASSA_ROTA"].sum()
+                else:
+                    massa_seletiva = 0
+                if massa_total_ton == 0 or pd.isna(massa_total_ton):
+                    usar_dados_coleta = False  # fallback
+                    st.warning("Dados de coleta insuficientes. Usando dados agregados dos municípios.")
+            else:
+                usar_dados_coleta = False
+                st.warning("Coluna 'MASSA_ROTA' não encontrada. Usando dados agregados.")
+
+        if not usar_dados_coleta:
+            # Usa os dados agregados da tabela de resíduos (comportamento original)
+            if "MASSA_TOTAL_RSU" in df_res_filt.columns:
+                massa_total_ton = df_res_filt["MASSA_TOTAL_RSU"].sum()
+            else:
+                massa_total_ton = 0
+            if "MASSA_SELETIVA" in df_res_filt.columns:
+                massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
+            else:
+                massa_seletiva = 0
+
+        # --- Cálculos e exibição (idênticos ao original) ---
+        if massa_total_ton > 0 and pop_total > 0:
+            massa_total_kg = massa_total_ton * 1000
+            per_capita_ano = massa_total_kg / pop_total
+            per_capita_dia = per_capita_ano / 365
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(
                     "Geração per capita (kg/hab/ano)",
                     formatar_metric(per_capita_ano, 2),
                     help="Calculado como: Massa total de RSU (kg) / População total. Fonte: SNIS."
                 )
-                col1.caption("📌 **Fórmula:** Massa total (kg) ÷ População total = kg/hab/ano")
-                col1.caption(f"📌 **Dados usados:** Massa total = {formatar_metric(massa_total_ton, 0)} t = {formatar_metric(massa_total_kg, 0)} kg; População = {formatar_metric(pop_total, 0)} hab")
+                st.caption("📌 **Fórmula:** Massa total (kg) ÷ População total = kg/hab/ano")
+                st.caption(f"📌 **Dados usados:** Massa total = {formatar_metric(massa_total_ton, 0)} t = {formatar_metric(massa_total_kg, 0)} kg; População = {formatar_metric(pop_total, 0)} hab")
 
-                col2.metric(
+            with col2:
+                st.metric(
                     "Geração per capita (kg/hab/dia)",
                     formatar_metric(per_capita_dia, 3),
                     help="Calculado como: Geração anual (kg/hab/ano) / 365 dias. Fonte: SNIS."
                 )
-                col2.caption("📌 **Fórmula:** Geração anual (kg/hab/ano) ÷ 365 = kg/hab/dia")
-                col2.caption(f"📌 **Cálculo:** {formatar_metric(per_capita_ano, 4)} kg/hab/ano ÷ 365 = {formatar_metric(per_capita_dia, 4)} kg/hab/dia")
+                st.caption("📌 **Fórmula:** Geração anual (kg/hab/ano) ÷ 365 = kg/hab/dia")
+                st.caption(f"📌 **Cálculo:** {formatar_metric(per_capita_ano, 4)} kg/hab/ano ÷ 365 = {formatar_metric(per_capita_dia, 4)} kg/hab/dia")
 
         # Taxa de coleta seletiva
-        if "MASSA_SELETIVA" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
-            massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
-            if massa_total_ton > 0:
-                taxa_cobertura = (massa_seletiva / massa_total_ton) * 100
-                st.metric(
-                    "Taxa de coleta seletiva (%)",
-                    formatar_metric(taxa_cobertura, 2),
-                    help="Percentual da massa total que é coletada seletivamente. Fonte: SNIS."
-                )
-                st.caption("📌 **Fórmula:** (Massa coletada seletivamente ÷ Massa total de RSU) × 100")
-                st.caption(f"📌 **Dados:** Massa seletiva = {formatar_metric(massa_seletiva, 0)} t; Massa total = {formatar_metric(massa_total_ton, 0)} t")
+        if massa_total_ton > 0:
+            taxa_cobertura = (massa_seletiva / massa_total_ton) * 100 if massa_total_ton > 0 else 0
+            st.metric(
+                "Taxa de coleta seletiva (%)",
+                formatar_metric(taxa_cobertura, 2),
+                help="Percentual da massa total que é coletada seletivamente. Fonte: SNIS."
+            )
+            st.caption("📌 **Fórmula:** (Massa coletada seletivamente ÷ Massa total de RSU) × 100")
+            st.caption(f"📌 **Dados:** Massa seletiva = {formatar_metric(massa_seletiva, 0)} t; Massa total = {formatar_metric(massa_total_ton, 0)} t")
 
-        # Ranking de maior e menor massa
+        # Ranking de maior e menor massa (inalterado)
         if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
             df_rank = df_res_filt.dropna(subset=["MASSA_TOTAL_RSU"])
             if not df_rank.empty:
@@ -331,7 +375,7 @@ with tab1:
 
     st.markdown("---")
     
-    # Texto explicativo para gráfico de barras por UF (sem travessão)
+    # Gráficos (exatamente como estavam)
     if "UF" in df_res_filt.columns:
         st.markdown("**Distribuição dos municípios por estado.** Este gráfico mostra quantos municípios estão presentes na base de dados para cada Unidade Federativa. Permite identificar a cobertura do SNIS e eventuais discrepâncias regionais.")
         uf_counts = df_res_filt["UF"].value_counts().reset_index()
@@ -343,7 +387,6 @@ with tab1:
             fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
             st.plotly_chart(fig_uf, use_container_width=True)
 
-    # Texto explicativo para histograma de população (sem travessão)
     if "POP_TOTAL" in df_res_filt.columns:
         st.markdown("**Distribuição da população dos municípios.** O histograma agrupa os municípios por faixas de população. Ajuda a entender se a base é composta majoritariamente por municípios pequenos, médios ou grandes, influenciando a interpretação de médias per capita.")
         fig_pop = px.histogram(df_res_filt, x="POP_TOTAL", nbins=50, 
@@ -354,7 +397,6 @@ with tab1:
         if fig_pop is not None:
             st.plotly_chart(fig_pop, use_container_width=True)
 
-    # Texto explicativo para Top 10 UFs por massa (sem travessão)
     if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
         st.markdown("**Top 10 UF com maior massa de RSU.** Agrega a massa total de resíduos sólidos urbanos declarada por município, somando por estado. Reflete tanto o tamanho da população quanto a intensidade da geração de resíduos em cada UF.")
         uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
@@ -368,7 +410,7 @@ with tab1:
             st.plotly_chart(fig_massa, use_container_width=True)
 
 # =========================================================
-# TAB 2 - MUNICÍPIOS (REFINADA)
+# TAB 2 - MUNICÍPIOS (INALTERADA)
 # =========================================================
 with tab2:
     st.header("🏙️ Análise por Município")
@@ -387,7 +429,6 @@ with tab2:
                     df_tab[col] = df_tab[col].apply(lambda x: formatar_metric(x, 0) if pd.notna(x) else "")
             st.dataframe(df_tab, use_container_width=True, height=400, hide_index=True)
 
-        # Texto explicativo para gráfico de dispersão (sem travessão)
         if "POP_TOTAL" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
             st.markdown("**População × Massa de RSU.** Cada ponto representa um município. A relação esperada é positiva (mais habitantes geram mais resíduos). Pontos muito afastados da tendência podem indicar erros de declaração ou particularidades locais.")
             fig_scatter = px.scatter(df_res_filt, x="POP_TOTAL", y="MASSA_TOTAL_RSU", 
@@ -400,7 +441,7 @@ with tab2:
                 st.plotly_chart(fig_scatter, use_container_width=True)
 
 # =========================================================
-# TAB 3 - ROTAS DE COLETA (REFINADA)
+# TAB 3 - ROTAS DE COLETA (INALTERADA)
 # =========================================================
 with tab3:
     st.header("🚚 Análise das Rotas de Coleta")
@@ -441,7 +482,7 @@ with tab3:
         st.dataframe(df_amostra, use_container_width=True, height=300, hide_index=True)
 
 # =========================================================
-# TAB 4 - DESTINAÇÃO (COM FILTRO DE TRANSBORDO)
+# TAB 4 - DESTINAÇÃO (INALTERADA)
 # =========================================================
 with tab4:
     st.header("♻️ Análise da Destinação dos Resíduos")
@@ -480,7 +521,6 @@ with tab4:
                     fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
                     st.plotly_chart(fig_dest, use_container_width=True)
                 
-                # Gráfico de percentual (CORRIGIDO)
                 st.markdown("**Percentual da massa destinada por tipo.** Este gráfico mostra a distribuição percentual da massa total encaminhada para cada destino. Facilita a comparação relativa entre as diferentes formas de destinação, independentemente do volume absoluto.")
                 mass_dest['Percentual'] = (mass_dest['MASSA_ROTA'] / mass_dest['MASSA_ROTA'].sum()) * 100
                 fig_perc = px.bar(mass_dest, x="TIPO_DESTINO", y="Percentual",
@@ -497,7 +537,6 @@ with tab4:
                 if fig_dest is not None:
                     st.plotly_chart(fig_dest, use_container_width=True)
 
-        # Distribuição por Estado
         st.subheader("📊 Distribuição da Massa por Estado")
         
         if "MASSA_ROTA" in df_destino.columns:
@@ -540,7 +579,7 @@ with tab4:
         st.info("Nenhum dado disponível para a análise de destinação.")
 
 # =========================================================
-# TAB 5 - COMPARAÇÃO 2023 vs 2024 (REFINADA)
+# TAB 5 - COMPARAÇÃO 2023 vs 2024 (INALTERADA)
 # =========================================================
 with tab5:
     st.header("📈 Comparação entre 2023 e 2024")
