@@ -232,7 +232,9 @@ def filtrar_df(df):
     if "UF" in df.columns and uf_selecionada != "Todas":
         df = df[df["UF"] == uf_selecionada]
     if "POP_TOTAL" in df.columns:
-        df = df[(df["POP_TOTAL"] >= pop_min_filt) & (df["POP_TOTAL"] <= pop_max_filt)]
+        # Mantém São Paulo (COD_IBGE 3550308) independente da faixa populacional
+        cond = ((df["POP_TOTAL"] >= pop_min_filt) & (df["POP_TOTAL"] <= pop_max_filt)) | (df["COD_IBGE"] == 3550308)
+        df = df[cond]
     return df
 
 df_res_filt = filtrar_df(df_res)
