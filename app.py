@@ -260,7 +260,7 @@ with tab1:
         st.metric("Total de municípios", df_res_filt.shape[0] if df_res_filt is not None else 0)
     with col2:
         if "UF" in df_res_filt.columns:
-            st.metric("Estados representados", df_res_filt["UF"].nunique())
+            st.metric("Unidades Federativas (UF)", df_res_filt["UF"].nunique())
     with col3:
         if "POP_TOTAL" in df_res_filt.columns:
             pop_total = df_res_filt["POP_TOTAL"].sum()
@@ -356,7 +356,7 @@ with tab1:
 
     # Texto explicativo para Top 10 UFs por massa (sem travessão)
     if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
-        st.markdown("**Top 10 estados com maior massa de RSU.** Agrega a massa total de resíduos sólidos urbanos declarada por município, somando por estado. Reflete tanto o tamanho da população quanto a intensidade da geração de resíduos em cada UF.")
+        st.markdown("**Top 10 UF com maior massa de RSU.** Agrega a massa total de resíduos sólidos urbanos declarada por município, somando por estado. Reflete tanto o tamanho da população quanto a intensidade da geração de resíduos em cada UF.")
         uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
         uf_massa = uf_massa.sort_values("MASSA_TOTAL_RSU", ascending=False).head(10)
         fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
