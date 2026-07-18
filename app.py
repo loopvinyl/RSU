@@ -288,6 +288,14 @@ with tab1:
         if usar_dados_coleta and df_col_filt is not None and not df_col_filt.empty:
             # Usa dados das rotas de coleta, excluindo transbordo
             df_rotas = df_col_filt.copy()
+            
+            # ========== CORREÇÃO APLICADA ==========
+            # Filtrar apenas municípios que estão em df_res_filt (respeita filtros populacionais/UF)
+            if "COD_IBGE" in df_res_filt.columns and "COD_IBGE" in df_rotas.columns:
+                codigos_validos = df_res_filt["COD_IBGE"].dropna().unique()
+                df_rotas = df_rotas[df_rotas["COD_IBGE"].isin(codigos_validos)]
+            # =======================================
+
             if "TIPO_DESTINO" in df_rotas.columns:
                 df_rotas['destino_norm'] = df_rotas['TIPO_DESTINO'].astype(str).apply(
                     lambda x: unicodedata.normalize('NFKD', x).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
