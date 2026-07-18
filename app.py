@@ -260,7 +260,6 @@ with tab1:
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total de municípios", df_res_filt.shape[0] if df_res_filt is not None else 0)
-        # para formatar coloca a linha abaixo
         st.metric("Total de municípios", formatar_metric(total_municipios, 0))
     
     
