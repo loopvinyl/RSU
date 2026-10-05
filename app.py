@@ -1,9 +1,8 @@
 # =========================================================
 # RSU BRASIL — MONITORAMENTO DA GESTÃO DE RESÍDUOS SÓLIDOS URBANOS
 # Subsídio ao Ministério do Meio Ambiente (MMA) — PNRS / PLANARES / SINISA
-# v2.2 — filtro global "Excluir transbordo" + aviso dinâmico por aba
+# v2.3 — 6 abas (removida "Dados e Exportação")
 # =========================================================
-import io
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -281,22 +280,21 @@ with st.container(border=True):
         )
         st.markdown(
             "**Afeta:** Painel Nacional · Coleta e Cobertura · Destinação Final · "
-            "Recuperação · Dados e Exportação  \n"
+            "Recuperação de Materiais  \n"
             "**Não afeta:** Análise Territorial · Inclusão Socioprodutiva "
             "(baseadas em agregados municipais, sem coluna de destino)."
         )
 
 # =========================================================
-# ABAS
+# ABAS (6 abas)
 # =========================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🇧🇷 Painel Nacional",
     "🗺️ Análise Territorial",
     "🚛 Coleta e Cobertura",
     "🏭 Destinação Final",
     "♻️ Recuperação de Materiais",
     "👥 Inclusão Socioprodutiva",
-    "📥 Dados e Exportação",
 ])
 
 # ---------------------------------------------------------
@@ -728,66 +726,11 @@ with tab6:
         st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------------------------------------
-# TAB 7 — DADOS E EXPORTAÇÃO
-# ---------------------------------------------------------
-with tab7:
-    st.subheader("📥 Dados Consolidados e Exportação")
-    aviso_filtro_transbordo(afetada=True)
-
-    dc_tab = filtrar_transbordo(dc, excluir_transbordo)
-
-    st.markdown("#### Painel municipal consolidado")
-    base = dr[[c for c in ["COD_IBGE","MUNICIPIO","UF","REGIAO","POP_TOTAL",
-                            "MASSA_TOTAL","MASSA_RECUPERADA","N_VEICULOS",
-                            "N_COOP","CATADORES_ORG","CATADORES_INFO",
-                            "ESTUDO_CARACT"] if c in dr.columns]].copy()
-    if "MASSA_TOTAL" in base.columns and "POP_TOTAL" in base.columns:
-        base["PER_CAPITA_KG"] = (base["MASSA_TOTAL"] / base["POP_TOTAL"] * 1000).round(1)
-    if "MASSA_TOTAL" in base.columns and "MASSA_RECUPERADA" in base.columns:
-        base["TAXA_RECUP_%"] = (base["MASSA_RECUPERADA"] / base["MASSA_TOTAL"] * 100).round(2)
-    base = base.sort_values("MASSA_TOTAL", ascending=False)
-
-    st.dataframe(base.style.format({
-        "POP_TOTAL":"{:,.0f}","MASSA_TOTAL":"{:,.0f}",
-        "MASSA_RECUPERADA":"{:,.0f}","PER_CAPITA_KG":"{:,.1f}",
-        "TAXA_RECUP_%":"{:.2f}","N_VEICULOS":"{:,.0f}",
-        "N_COOP":"{:,.0f}","CATADORES_ORG":"{:,.0f}","CATADORES_INFO":"{:,.0f}",
-    }), use_container_width=True, height=500)
-
-    st.markdown("---")
-    st.markdown("#### 📤 Baixar dados")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.download_button("⬇️ Painel municipal (CSV)",
-            data=base.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"rsu_municipal_{ano_sel}.csv", mime="text/csv",
-            use_container_width=True)
-    with c2:
-        if not dc_tab.empty:
-            st.download_button("⬇️ Rotas e destinos (CSV)",
-                data=dc_tab.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"rsu_rotas_{ano_sel}.csv", mime="text/csv",
-                use_container_width=True)
-    with c3:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            base.to_excel(w, sheet_name="Municipal", index=False)
-            if not dc_tab.empty:
-                dc_tab.head(5000).to_excel(w, sheet_name="Rotas", index=False)
-            reg.to_excel(w, sheet_name="Regiao", index=False)
-            uf.to_excel(w, sheet_name="UF", index=False)
-        st.download_button("⬇️ Pacote completo (XLSX)",
-            data=buf.getvalue(),
-            file_name=f"rsu_brasil_{ano_sel}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True)
-
-# ---------------------------------------------------------
 # RODAPÉ
 # ---------------------------------------------------------
 st.markdown("---")
 st.caption("""
-**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.2
+**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.3
 Fonte: **SINISA** · Metodologia alinhada à **PNRS (Lei 12.305/2010)**, **Decreto 10.936/2022**
 e **PLANARES (Decreto 11.043/2022)**. Ferramenta de apoio ao **Ministério do Meio Ambiente (MMA)**.
 """)
