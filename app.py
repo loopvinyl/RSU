@@ -1,7 +1,7 @@
 # =========================================================
 # RSU BRASIL — MONITORAMENTO DA GESTÃO DE RESÍDUOS SÓLIDOS URBANOS
 # Subsídio ao Ministério do Meio Ambiente (MMA) — PNRS / PLANARES / SINISA
-# v2.1 — inclui filtro "excluir transbordo" por aba
+# v2.2 — filtro global "Excluir transbordo" + aviso dinâmico por aba
 # =========================================================
 import io
 from pathlib import Path
@@ -89,10 +89,10 @@ def classificar_destino(tipo):
 
 def filtrar_transbordo(df, excluir):
     """
-    Remove rotas cujo destino final é 'Unidade de Transbordo'.
-    ATENÇÃO: transbordo é etapa intermediária — incluir no cômputo de
-    destinação final gera dupla contagem da massa (SINISA registra a rota
-    'município→transbordo' e a rota 'transbordo→aterro' separadamente).
+    Remove rotas cujo destino é 'Unidade de Transbordo'.
+    ATENÇÃO: transbordo é etapa intermediária — o SINISA registra a rota
+    'município→transbordo' E a rota 'transbordo→destino final' separadamente.
+    Incluir transbordo no cômputo de destinação final DUPLICA a massa.
     """
     if not excluir or df is None or df.empty:
         return df
@@ -102,6 +102,30 @@ def filtrar_transbordo(df, excluir):
         "Transbordo", case=False, na=False, regex=False
     )
     return df[~mask].copy()
+
+# ---------------------------------------------------------
+# AVISO DINÂMICO DENTRO DE CADA ABA
+# ---------------------------------------------------------
+def aviso_filtro_transbordo(afetada, motivo_nao_afeta=None):
+    """Exibe no topo da aba o efeito (ou não) do filtro global."""
+    if afetada:
+        if excluir_transbordo:
+            st.success(
+                "🚫 **Filtro 'Excluir transbordo' ATIVO** — "
+                "as métricas desta aba **não incluem** rotas cujo destino é "
+                "'Unidade de Transbordo'. Sem dupla contagem."
+            )
+        else:
+            st.info(
+                "ℹ️ **Filtro 'Excluir transbordo' INATIVO** — "
+                "rotas para 'Unidade de Transbordo' **estão sendo contadas** "
+                "nesta aba. Ative o filtro acima para evitar dupla contagem."
+            )
+    else:
+        st.caption(
+            f"ℹ️ O filtro 'Excluir transbordo' **não se aplica** a esta aba. "
+            f"{motivo_nao_afeta or ''}"
+        )
 
 # ---------------------------------------------------------
 # CARREGAMENTO
@@ -210,6 +234,9 @@ Subsidia o acompanhamento da **PNRS (Lei 12.305/2010)**, do **PLANARES (Decreto 
 e das metas de universalização e recuperação.
 """)
 
+# ---------------------------------------------------------
+# FILTROS DA SIDEBAR (ano, comparação, UF, região)
+# ---------------------------------------------------------
 st.sidebar.header("⚙️ Filtros globais")
 ano_sel = st.sidebar.selectbox("Ano de referência:", ANOS_DISP, index=len(ANOS_DISP)-1)
 ano_comp = st.sidebar.selectbox("Comparar com:",
@@ -231,6 +258,35 @@ dr = filtrar(dados[ano_sel]["residuos"])
 dc = filtrar(dados[ano_sel]["coleta"])
 
 # =========================================================
+# 🌐 FILTRO GLOBAL — ANTES DAS ABAS
+# =========================================================
+with st.container(border=True):
+    c1, c2 = st.columns([1, 2.2])
+    with c1:
+        st.markdown("### 🚫 Filtro de rotas")
+        excluir_transbordo = st.checkbox(
+            "**Excluir transbordo** (aplica-se a todas as abas)",
+            value=False,
+            key="exc_tb_global",
+        )
+    with c2:
+        st.markdown("**O que este filtro faz?**")
+        st.markdown(
+            "Remove rotas cujo destino final é **'Unidade de Transbordo'**.\n\n"
+            "**Por que é importante:** o transbordo **não é** destinação final — é uma "
+            "estação de transferência. O SINISA registra a rota *'município → transbordo'* "
+            "e a rota *'transbordo → aterro'* **separadamente**. Se você incluir transbordo "
+            "no cômputo de destinação final, **a massa é contada duas vezes**, inflando "
+            "os totais."
+        )
+        st.markdown(
+            "**Afeta:** Painel Nacional · Coleta e Cobertura · Destinação Final · "
+            "Recuperação · Dados e Exportação  \n"
+            "**Não afeta:** Análise Territorial · Inclusão Socioprodutiva "
+            "(baseadas em agregados municipais, sem coluna de destino)."
+        )
+
+# =========================================================
 # ABAS
 # =========================================================
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -248,16 +304,9 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 # ---------------------------------------------------------
 with tab1:
     st.subheader(f"Painel Nacional — SINISA {ano_sel}")
+    aviso_filtro_transbordo(afetada=True)
 
-    exc_tb_1 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab1",
-        help="Remove rotas cujo destino é 'Unidade de Transbordo'. "
-             "Transbordo é etapa intermediária — incluir no cômputo de destinação "
-             "final gera dupla contagem da massa no SINISA.",
-    )
-    dc_tab = filtrar_transbordo(dc, exc_tb_1)
+    dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
     pop_total   = dr["POP_TOTAL"].sum()
     massa_total = dr["MASSA_TOTAL"].sum()
@@ -277,7 +326,7 @@ with tab1:
         n_mun_lixao = dc_tab[dc_tab["UNIDADE_DEST"].astype(str)
                              .str.contains("Lixão|Vazadouro", case=False, na=False)]["COD_IBGE"].nunique()
     else:
-        mt = mad = mina = 0; pct_ad = pct_in = n_mun_lixao = 0
+        pct_ad = pct_in = n_mun_lixao = 0
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🏙️ Municípios que reportaram", f"{n_mun:,}".replace(",", "."))
@@ -305,9 +354,7 @@ with tab1:
         st.markdown("---")
         st.subheader(f"📈 Evolução {ano_comp} → {ano_sel}")
         dr_c = filtrar(dados[ano_comp]["residuos"])
-        dc_c = filtrar(dados[ano_comp]["coleta"])
-        dc_c = filtrar_transbordo(dc_c, exc_tb_1)  # mesmo filtro para comparação justa
-
+        dc_c = filtrar_transbordo(filtrar(dados[ano_comp]["coleta"]), excluir_transbordo)
         pop_c   = dr_c["POP_TOTAL"].sum()
         massa_c = dr_c["MASSA_TOTAL"].sum()
         recup_c = dr_c["MASSA_RECUPERADA"].sum()
@@ -338,16 +385,12 @@ with tab1:
 # ---------------------------------------------------------
 with tab2:
     st.subheader("🗺️ Análise Territorial — Região e Estado")
-
-    exc_tb_2 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab2",
-        help="Nesta aba o filtro não altera os indicadores por região/UF "
-             "(baseados em massa total coletada). Mantido por consistência com as demais abas.",
-        disabled=True,
+    aviso_filtro_transbordo(
+        afetada=False,
+        motivo_nao_afeta="Esta aba usa dados agregados por município "
+                         "(aba 'Manejo_Resíduos_Sólidos_Urbanos'), que não possui "
+                         "coluna de destino final."
     )
-    # (massa de resíduos não tem destino — filtro não se aplica)
 
     reg = dr.groupby("REGIAO", dropna=False).agg(
         MUNICIPIOS=("COD_IBGE", "nunique"),
@@ -411,16 +454,9 @@ with tab2:
 # ---------------------------------------------------------
 with tab3:
     st.subheader("🚛 Coleta e Cobertura")
+    aviso_filtro_transbordo(afetada=True)
 
-    exc_tb_3 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab3",
-        help="Remove rotas cujo destino é 'Unidade de Transbordo'. "
-             "Transbordo é etapa intermediária — incluir no cômputo de destinação "
-             "final gera dupla contagem da massa no SINISA.",
-    )
-    dc_tab = filtrar_transbordo(dc, exc_tb_3)
+    dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
     if dc_tab.empty:
         st.info("Sem dados de coleta para o filtro selecionado.")
@@ -475,16 +511,9 @@ with tab3:
 # ---------------------------------------------------------
 with tab4:
     st.subheader("🏭 Destinação Final — Conformidade com a PNRS")
+    aviso_filtro_transbordo(afetada=True)
 
-    exc_tb_4 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab4",
-        help="Remove rotas cujo destino é 'Unidade de Transbordo'. "
-             "Transbordo é etapa intermediária — incluir no cômputo de destinação "
-             "final gera dupla contagem da massa no SINISA.",
-    )
-    dc_tab = filtrar_transbordo(dc, exc_tb_4)
+    dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
     if dc_tab.empty:
         st.info("Sem dados de destinação para o filtro.")
@@ -502,14 +531,13 @@ with tab4:
         cat["%"] = (cat["MASSA"] / cat["MASSA"].sum() * 100).round(2)
         adeq = cat[cat["CATEGORIA"] == "Adequado"]["%"].sum()
         inad = cat[cat["CATEGORIA"] == "Inadequado"]["%"].sum()
+        transb = cat[cat["CATEGORIA"] == "Transbordo"]["%"].sum() if "Transbordo" in cat["CATEGORIA"].values else 0
 
         c1, c2, c3 = st.columns(3)
         c1.metric("✅ Destinação adequada", f"{fmt_br(adeq, 1)}%")
         c2.metric("🚨 Destinação inadequada", f"{fmt_br(inad, 1)}%")
-        c3.metric("📦 Transbordo (etapa intermediária)",
-                  f"{fmt_br(cat[cat['CATEGORIA']=='Transbordo']['%'].sum(), 1)}%",
-                  help="Se esta métrica aparecer > 0, o filtro 'Excluir transbordo' "
-                       "não está ativo nesta aba.")
+        c3.metric("📦 Transbordo (etapa intermediária)", f"{fmt_br(transb, 1)}%",
+                  help="Se > 0%, o filtro 'Excluir transbordo' está inativo.")
 
         c1, c2 = st.columns(2)
         with c1:
@@ -584,16 +612,9 @@ with tab4:
 # ---------------------------------------------------------
 with tab5:
     st.subheader("♻️ Recuperação de Materiais e Coleta Seletiva")
+    aviso_filtro_transbordo(afetada=True)
 
-    exc_tb_5 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab5",
-        help="Remove rotas cujo destino é 'Unidade de Transbordo'. "
-             "Transbordo é etapa intermediária — incluir no cômputo de destinação "
-             "final gera dupla contagem da massa no SINISA.",
-    )
-    dc_tab = filtrar_transbordo(dc, exc_tb_5)
+    dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
     if dc_tab.empty or dr.empty:
         st.info("Sem dados para o filtro.")
@@ -644,14 +665,10 @@ with tab5:
 # ---------------------------------------------------------
 with tab6:
     st.subheader("👥 Inclusão Socioprodutiva de Catadores e Frota")
-
-    exc_tb_6 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab6",
-        help="Nesta aba o filtro não altera os indicadores (baseados em cadastro de "
-             "cooperativas e frota, não em rotas de destinação). Mantido por consistência.",
-        disabled=True,
+    aviso_filtro_transbordo(
+        afetada=False,
+        motivo_nao_afeta="Esta aba usa o cadastro de cooperativas e a frota de "
+                         "veículos, que não possuem coluna de destino final."
     )
 
     c1, c2, c3, c4 = st.columns(4)
@@ -715,16 +732,9 @@ with tab6:
 # ---------------------------------------------------------
 with tab7:
     st.subheader("📥 Dados Consolidados e Exportação")
+    aviso_filtro_transbordo(afetada=True)
 
-    exc_tb_7 = st.checkbox(
-        "🚫 Excluir transbordo (nesta aba)",
-        value=False,
-        key="exc_tb_tab7",
-        help="Remove rotas cujo destino é 'Unidade de Transbordo'. "
-             "Transbordo é etapa intermediária — incluir no cômputo de destinação "
-             "final gera dupla contagem da massa no SINISA.",
-    )
-    dc_tab = filtrar_transbordo(dc, exc_tb_7)
+    dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
     st.markdown("#### Painel municipal consolidado")
     base = dr[[c for c in ["COD_IBGE","MUNICIPIO","UF","REGIAO","POP_TOTAL",
@@ -777,7 +787,7 @@ with tab7:
 # ---------------------------------------------------------
 st.markdown("---")
 st.caption("""
-**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.1
+**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.2
 Fonte: **SINISA** · Metodologia alinhada à **PNRS (Lei 12.305/2010)**, **Decreto 10.936/2022**
 e **PLANARES (Decreto 11.043/2022)**. Ferramenta de apoio ao **Ministério do Meio Ambiente (MMA)**.
 """)
