@@ -1,7 +1,7 @@
 # =========================================================
 # RSU BRASIL — MONITORAMENTO DA GESTÃO DE RESÍDUOS SÓLIDOS URBANOS
 # Subsídio ao Ministério do Meio Ambiente (MMA) — PNRS / PLANARES / SINISA
-# v2.3 — 6 abas (removida "Dados e Exportação")
+# v2.4 — filtro de transbordo agora com feedback visual explícito
 # =========================================================
 from pathlib import Path
 import numpy as np
@@ -87,12 +87,7 @@ def classificar_destino(tipo):
     return "Outros"
 
 def filtrar_transbordo(df, excluir):
-    """
-    Remove rotas cujo destino é 'Unidade de Transbordo'.
-    ATENÇÃO: transbordo é etapa intermediária — o SINISA registra a rota
-    'município→transbordo' E a rota 'transbordo→destino final' separadamente.
-    Incluir transbordo no cômputo de destinação final DUPLICA a massa.
-    """
+    """Remove rotas cujo destino é 'Unidade de Transbordo'."""
     if not excluir or df is None or df.empty:
         return df
     if "UNIDADE_DEST" not in df.columns:
@@ -106,7 +101,6 @@ def filtrar_transbordo(df, excluir):
 # AVISO DINÂMICO DENTRO DE CADA ABA
 # ---------------------------------------------------------
 def aviso_filtro_transbordo(afetada, motivo_nao_afeta=None):
-    """Exibe no topo da aba o efeito (ou não) do filtro global."""
     if afetada:
         if excluir_transbordo:
             st.success(
@@ -234,7 +228,7 @@ e das metas de universalização e recuperação.
 """)
 
 # ---------------------------------------------------------
-# FILTROS DA SIDEBAR (ano, comparação, UF, região)
+# FILTROS DA SIDEBAR
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Filtros globais")
 ano_sel = st.sidebar.selectbox("Ano de referência:", ANOS_DISP, index=len(ANOS_DISP)-1)
@@ -281,8 +275,7 @@ with st.container(border=True):
         st.markdown(
             "**Afeta:** Painel Nacional · Coleta e Cobertura · Destinação Final · "
             "Recuperação de Materiais  \n"
-            "**Não afeta:** Análise Territorial · Inclusão Socioprodutiva "
-            "(baseadas em agregados municipais, sem coluna de destino)."
+            "**Não afeta:** Análise Territorial · Inclusão Socioprodutiva."
         )
 
 # =========================================================
@@ -306,14 +299,20 @@ with tab1:
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
+    # ---------- Números de referência (SINISA — invariantes) ----------
     pop_total   = dr["POP_TOTAL"].sum()
-    massa_total = dr["MASSA_TOTAL"].sum()
+    massa_total = dr["MASSA_TOTAL"].sum()             # GTR1028 (aba resíduos)
     massa_recup = dr["MASSA_RECUPERADA"].sum()
     n_mun       = dr["COD_IBGE"].nunique()
     n_coop      = dr["N_COOP"].sum()
     per_cap     = (massa_total / pop_total * 1000) if pop_total > 0 else 0
     per_cap_dia = per_cap / 365
     taxa_recup  = (massa_recup / massa_total * 100) if massa_total > 0 else 0
+
+    # ---------- Números de rota (MUDAM com o filtro) ----------
+    massa_rota_bruta  = dc["MASSA_ROTA"].sum() if not dc.empty and "MASSA_ROTA" in dc.columns else 0
+    massa_rota_filtro = dc_tab["MASSA_ROTA"].sum() if not dc_tab.empty and "MASSA_ROTA" in dc_tab.columns else 0
+    massa_removida    = massa_rota_bruta - massa_rota_filtro
 
     if not dc_tab.empty and "MASSA_ROTA" in dc_tab.columns:
         mt   = dc_tab["MASSA_ROTA"].sum()
@@ -326,28 +325,80 @@ with tab1:
     else:
         pct_ad = pct_in = n_mun_lixao = 0
 
+    # ----- LINHA 1: População e referência SINISA -----
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("🏙️ Municípios que reportaram", f"{n_mun:,}".replace(",", "."))
     c2.metric("👥 População coberta", f"{fmt_br(pop_total)} hab")
-    c3.metric("⚖️ Massa total coletada", f"{fmt_br(massa_total)} t/ano")
+    c3.metric("⚖️ Massa coletada (SINISA)", f"{fmt_br(massa_total)} t/ano",
+              help="Campo GTR1028 — massa que ENTRA no sistema de coleta. "
+                   "Referencial oficial da PNRS, **não depende do destino final**.")
     c4.metric("📊 Per capita", f"{fmt_br(per_cap, 0)} kg/hab/ano",
               help=f"= {fmt_br(per_cap_dia, 2)} kg/hab/dia")
 
+    # ----- LINHA 2: Massa ROTEADA (é aqui que o filtro atua) -----
+    st.markdown("##### 🔀 Massa por rota de destinação")
+    st.caption("Os valores abaixo são calculados a partir das **rotas de coleta e destinação** "
+               "(aba `Manejo_Coleta_e_Destinação`) e **reagem ao filtro 'Excluir transbordo'**.")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("♻️ Taxa de recuperação", f"{fmt_br(taxa_recup, 2)}%",
+    c1.metric("🗺️ Massa com destino declarado", f"{fmt_br(massa_rota_filtro)} t/ano",
+              help="Σ GTR1008 (rotas filtradas). É este valor que muda com o filtro.")
+    if excluir_transbordo:
+        c2.metric("🚫 Massa removida (transbordo)", f"{fmt_br(massa_removida)} t/ano",
+                  delta=f"-{fmt_br(massa_removida)} t",
+                  delta_color="inverse",
+                  help="Massa que passava por 'Unidade de Transbordo' e foi excluída.")
+    else:
+        c2.metric("📦 Transbordo incluído", f"{fmt_br(massa_removida)} t/ano",
+                  help="Ative o filtro acima para remover esta massa (evita dupla contagem).")
+    dif = massa_total - massa_rota_filtro
+    c3.metric("📐 Diferença (coleta × rota)", f"{fmt_br(dif)} t",
+              help="Massa coletada (SINISA) − massa roteada (após filtro). "
+                   "Diferença positiva grande = rotas não detalhadas; "
+                   "negativa = duplicidade.")
+    c4.metric("♻️ Taxa de recuperação", f"{fmt_br(taxa_recup, 2)}%",
               help="(Massa recuperada / Massa total) × 100 — PLANARES: 48% até 2040")
-    c2.metric("✅ Massa p/ destinação adequada", f"{fmt_br(pct_ad, 1)}%")
-    c3.metric("🚨 Massa p/ destinação inadequada", f"{fmt_br(pct_in, 1)}%",
-              help="Aterro controlado + Lixão/vazadouro")
-    c4.metric("⚠️ Municípios com lixão ativo", f"{n_mun_lixao:,}".replace(",", "."))
 
+    # ----- LINHA 3: Conformidade PNRS -----
+    st.markdown("##### ✅ Conformidade com a PNRS")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🏭 Cooperativas/associações", f"{fmt_br(n_coop)}")
-    c2.metric("👷 Catadores organizados", f"{fmt_br(dr['CATADORES_ORG'].sum())}")
-    c3.metric("🚛 Veículos na frota", f"{fmt_br(dr['N_VEICULOS'].sum())}")
+    c1.metric("✅ Massa p/ destinação adequada", f"{fmt_br(pct_ad, 1)}%")
+    c2.metric("🚨 Massa p/ destinação inadequada", f"{fmt_br(pct_in, 1)}%",
+              help="Aterro controlado + Lixão/vazadouro")
+    c3.metric("⚠️ Municípios com lixão ativo", f"{n_mun_lixao:,}".replace(",", "."))
     c4.metric("📚 Municípios c/ estudo de caracterização",
               f"{(dr['ESTUDO_CARACT'].astype(str).str.strip()=='Sim').sum():,}".replace(",", "."))
 
+    # ----- LINHA 4: Inclusão e frota -----
+    st.markdown("##### 👥 Inclusão socioprodutiva e frota")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🏭 Cooperativas/associações", f"{fmt_br(n_coop)}")
+    c2.metric("👷 Catadores organizados", f"{fmt_br(dr['CATADORES_ORG'].sum())}")
+    c3.metric("🚶 Catadores informais", f"{fmt_br(dr['CATADORES_INFO'].sum())}")
+    c4.metric("🚛 Veículos na frota", f"{fmt_br(dr['N_VEICULOS'].sum())}")
+
+    # ----- Diagnóstico (expander) -----
+    with st.expander("🔬 Diagnóstico: por que a massa coletada (SINISA) ≠ massa roteada?"):
+        st.markdown(f"""
+        - **Massa coletada (GTR1028):** {fmt_br(massa_total)} t
+          → campo oficial do SINISA, calculado **antes** da destinação.
+        - **Massa roteada (Σ GTR1008):** {fmt_br(massa_rota_bruta)} t (sem filtro) /
+          {fmt_br(massa_rota_filtro)} t (com filtro)
+          → soma das rotas de coleta com destino declarado.
+        - **Diferença:** {fmt_br(dif)} t ({(dif/massa_total*100 if massa_total>0 else 0):.1f}%)
+
+        **Como interpretar:**
+
+        | Situação | Significado |
+        |---|---|
+        | Diferença **positiva grande** | Municípios declararam massa coletada mas não detalharam rotas de destino (dado ausente no SINISA). |
+        | Diferença **negativa grande** | Rotas duplicadas — geralmente porque o transbordo não foi excluído. Ative o filtro. |
+        | Diferença **próxima de zero** | Dados consistentes entre as duas abas. |
+
+        ℹ️ Por isso os dois números aparecem separados: **um é o referencial oficial da PNRS**
+        (não muda com filtros), o outro é o detalhamento por rota (muda com o filtro).
+        """)
+
+    # ----- Comparação temporal -----
     if ano_comp != "—" and ano_comp in dados:
         st.markdown("---")
         st.subheader(f"📈 Evolução {ano_comp} → {ano_sel}")
@@ -366,7 +417,7 @@ with tab1:
             pct_ad_c = 0
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Massa total", f"{fmt_br(massa_total)} t",
+        c1.metric("Massa coletada (SINISA)", f"{fmt_br(massa_total)} t",
                   delta=f"{fmt_br(massa_total - massa_c)} t")
         c2.metric("Per capita", f"{fmt_br(per_cap, 0)} kg/hab/ano",
                   delta=f"{fmt_br(per_cap - pc_c, 0)} kg/hab/ano")
@@ -456,6 +507,15 @@ with tab3:
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
 
+    # Cards de massa roteada (reagem ao filtro)
+    massa_bruta = dc["MASSA_ROTA"].sum() if not dc.empty and "MASSA_ROTA" in dc.columns else 0
+    massa_filt  = dc_tab["MASSA_ROTA"].sum() if not dc_tab.empty and "MASSA_ROTA" in dc_tab.columns else 0
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🗺️ Massa com destino declarado", f"{fmt_br(massa_filt)} t/ano")
+    c2.metric("📦 Massa bruta (sem filtro)", f"{fmt_br(massa_bruta)} t/ano")
+    c3.metric("🚫 Redução pelo filtro",
+              f"{fmt_br(massa_bruta - massa_filt)} t" if excluir_transbordo else "—")
+
     if dc_tab.empty:
         st.info("Sem dados de coleta para o filtro selecionado.")
     else:
@@ -512,6 +572,27 @@ with tab4:
     aviso_filtro_transbordo(afetada=True)
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
+
+    # Cards que MOSTRAM o efeito do filtro
+    massa_bruta = dc["MASSA_ROTA"].sum() if not dc.empty and "MASSA_ROTA" in dc.columns else 0
+    massa_filt  = dc_tab["MASSA_ROTA"].sum() if not dc_tab.empty and "MASSA_ROTA" in dc_tab.columns else 0
+    massa_remov = massa_bruta - massa_filt
+    pct_remov   = (massa_remov / massa_bruta * 100) if massa_bruta > 0 else 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("⚖️ Massa com destino declarado", f"{fmt_br(massa_filt)} t/ano",
+              help="Σ GTR1008 após o filtro atual.")
+    c2.metric("📦 Massa bruta (sem filtro)", f"{fmt_br(massa_bruta)} t/ano",
+              help="Σ GTR1008 sem qualquer filtro de destino.")
+    if excluir_transbordo:
+        c3.metric("🚫 Redução pelo filtro",
+                  f"{fmt_br(massa_remov)} t",
+                  delta=f"-{fmt_br(pct_remov, 1)}%",
+                  delta_color="inverse",
+                  help="Massa que passava por transbordo (dupla contagem) e foi excluída.")
+    else:
+        c3.metric("🚫 Redução pelo filtro", "—",
+                  help="Ative 'Excluir transbordo' acima para remover a dupla contagem.")
 
     if dc_tab.empty:
         st.info("Sem dados de destinação para o filtro.")
@@ -730,7 +811,7 @@ with tab6:
 # ---------------------------------------------------------
 st.markdown("---")
 st.caption("""
-**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.3
+**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.4
 Fonte: **SINISA** · Metodologia alinhada à **PNRS (Lei 12.305/2010)**, **Decreto 10.936/2022**
 e **PLANARES (Decreto 11.043/2022)**. Ferramenta de apoio ao **Ministério do Meio Ambiente (MMA)**.
 """)
