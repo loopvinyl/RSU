@@ -1,683 +1,820 @@
-
-import streamlit as st
-import pandas as pd
+# =========================================================
+# RSU BRASIL — MONITORAMENTO DA GESTÃO DE RESÍDUOS SÓLIDOS URBANOS
+# Subsídio ao Ministério do Meio Ambiente (MMA) — PNRS / PLANARES / SINISA
+# Autor: Composta.IA / loopvinyl — v2.0 (monitoramento)
+# =========================================================
+import io
+from pathlib import Path
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import os
-import unicodedata
+import streamlit as st
 
-# =========================================================
+# ---------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA
-# =========================================================
+# ---------------------------------------------------------
 st.set_page_config(
-    page_title="📊 SNIS Resíduos - Análise Interativa",
+    page_title="RSU Brasil — Monitoramento (MMA)",
+    page_icon="♻️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-st.title("📊 Análise Interativa do SNIS - Resíduos Sólidos Urbanos")
+# ---------------------------------------------------------
+# CONSTANTES
+# ---------------------------------------------------------
+ANOS = ["2023", "2024"]
+ARQUIVOS = {
+    "2023": "rsuBrasil_2023.xlsx",
+    "2024": "rsuBrasil_2024.xlsx",
+}
+ABAS = {
+    "residuos":     "Manejo_Resíduos_Sólidos_Urbanos",
+    "coleta":       "Manejo_Coleta_e_Destinação",
+    "veiculos":     "Manejo_Veículos",
+    "cooperativas": "Manejo_Cooperativas",
+}
+
+# Classificação de adequação de destinação final (base PNRS art. 9º)
+DESTINO_ADEQUADO = {
+    "Aterro sanitário",
+    "Unidade de compostagem",
+    "Unidade de triagem (galpão ou usina)",
+    "Unidade de coprocessamento",
+    "Unidade de manejo de resíduos de áreas verdes (galhadas e podas)",
+    "Área de Transbordo e Triagem de resíduos da construção civil e volumosos (ATT)",
+    "Aterro de inertes",
+}
+DESTINO_INADEQUADO = {"Aterro controlado", "Lixão ou vazadouro"}
+DESTINO_NEUTRO    = {"Unidade de Transbordo"}
+
+CORES_REGIAO = {
+    "Norte":        "#1f9e89",
+    "Nordeste":     "#f39c12",
+    "Centro-Oeste": "#8e44ad",
+    "Sudeste":      "#2980b9",
+    "Sul":          "#27ae60",
+}
+
+# ---------------------------------------------------------
+# CARREGAMENTO DOS DADOS
+# ---------------------------------------------------------
+def _resolver_caminho(nome):
+    for p in [Path(nome), Path("data") / nome, Path("dados") / nome]:
+        if p.exists():
+            return str(p)
+    return None
+
+def _limpar_colunas(df):
+    cols = []
+    for i, c in enumerate(df.columns):
+        if pd.isna(c):
+            cols.append(f"_col_{i}")
+        else:
+            cols.append(str(c).strip())
+    df.columns = cols
+    return df
+
+@st.cache_data(show_spinner="Carregando dados do SINISA...")
+def carregar_ano(ano):
+    caminho = _resolver_caminho(ARQUIVOS[ano])
+    if caminho is None:
+        return None
+    dfs = {}
+    for chave, aba in ABAS.items():
+        try:
+            df = pd.read_excel(caminho, sheet_name=aba, header=12)
+            df = _limpar_colunas(df)
+            # A linha 0 após header=12 é a própria codificação em alguns casos;
+            # garantir que a coluna de código IBGE exista e que dados comecem na 1ª linha
+            dfs[chave] = df
+        except Exception as e:
+            st.warning(f"⚠️ Erro na aba {aba} ({ano}): {e}")
+            dfs[chave] = pd.DataFrame()
+    return dfs
+
+# ---------------------------------------------------------
+# FUNÇÕES DE APOIO
+# ---------------------------------------------------------
+def fmt_br(x, casas=0):
+    if pd.isna(x) or x is None:
+        return "–"
+    try:
+        x = float(x)
+    except (ValueError, TypeError):
+        return str(x)
+    if casas == 0:
+        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{x:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def to_num(s):
+    return pd.to_numeric(s, errors="coerce")
+
+def classificar_destino(tipo):
+    if pd.isna(tipo):
+        return "Não informado"
+    t = str(tipo).strip()
+    if t in DESTINO_ADEQUADO:    return "Adequado"
+    if t in DESTINO_INADEQUADO:  return "Inadequado"
+    if t in DESTINO_NEUTRO:      return "Transbordo"
+    if "aterro sanitário" in t.lower():  return "Adequado"
+    if "lixão" in t.lower() or "vazadouro" in t.lower(): return "Inadequado"
+    if "controlado" in t.lower():        return "Inadequado"
+    if "compostagem" in t.lower():       return "Adequado"
+    if "triagem" in t.lower():           return "Adequado"
+    return "Outros"
+
+def normalizar_texto(s):
+    if pd.isna(s): return ""
+    import unicodedata
+    s = str(s).strip().lower()
+    s = unicodedata.normalize("NFKD", s).encode("ASCII", "ignore").decode()
+    return s
+
+# ---------------------------------------------------------
+# CONSTRUÇÃO DO PAINEL MUNICIPAL (por ano)
+# ---------------------------------------------------------
+@st.cache_data(show_spinner="Consolidando dados municipais...")
+def consolidar_ano(ano):
+    dfs = carregar_ano(ano)
+    if dfs is None:
+        return None
+    dr = dfs["residuos"].copy()
+    dc = dfs["coleta"].copy()
+    dv = dfs["veiculos"].copy()
+    dk = dfs["cooperativas"].copy()
+
+    # ---------- Resíduos ----------
+    if not dr.empty:
+        dr = dr.rename(columns={
+            "Cod_IBGE": "COD_IBGE", "Nom_Mun": "MUNICIPIO",
+            "UF": "UF", "Nom_Região": "REGIAO",
+            "DFE0001": "POP_TOTAL", "DFE0002": "POP_URBANA", "DFE0003": "POP_RURAL",
+            "OGM4006": "DOM_TOTAL", "OGM4004": "DOM_URB", "OGM4005": "DOM_RURAL",
+            "OGM0005": "AREA_KM2",
+            "GTR1025": "MASSA_DOMICILIAR",
+            "GTR1026": "MASSA_SELETIVA",
+            "GTR1027": "MASSA_LIMPEZA",
+            "GTR1028": "MASSA_TOTAL",
+            "GTR1029": "MASSA_RECUPERADA",
+            "GTR1207": "N_VEICULOS",
+            "GTR1309*": "N_COOP", "GTR1310": "CATADORES_ORG", "GTR1311": "CATADORES_INFO",
+            "GTR1500*": "ESTUDO_CARACT",
+        })
+        for c in ["POP_TOTAL","POP_URBANA","POP_RURAL","DOM_TOTAL","AREA_KM2",
+                  "MASSA_DOMICILIAR","MASSA_SELETIVA","MASSA_LIMPEZA","MASSA_TOTAL",
+                  "MASSA_RECUPERADA","N_VEICULOS","N_COOP","CATADORES_ORG","CATADORES_INFO"]:
+            if c in dr.columns: dr[c] = to_num(dr[c])
+        dr["ANO"] = ano
+
+    # ---------- Coleta ----------
+    if not dc.empty:
+        dc = dc.rename(columns={
+            "Cod_IBGE": "COD_IBGE", "Nom_Mun": "MUNICIPIO", "UF": "UF",
+            "Nom_Região": "REGIAO",
+            "GTR1000": "COD_ROTA",
+            "GTR1001*": "TIPO_COLETA",
+            "GTR1002*": "ABRANGENCIA",
+            "GTR1003*": "EXECUTOR",
+            "GTR1004*": "MASSA_PUBLICA",
+            "GTR1005*": "MASSA_PRIVADA",
+            "GTR1006*": "MASSA_COOP_CONTR",
+            "GTR1007*": "MASSA_COOP_NAO",
+            "GTR1008": "MASSA_ROTA",
+            "Cod_IBGE_Mun_Dest": "COD_IBGE_DEST",
+            "GTR1010*": "MUN_DEST",
+            "GTR1011*": "UNIDADE_DEST",
+            "GTR1012*": "EXEC_DEST",
+            "GTR1013*": "NOME_UNIDADE",
+            "GTR1017": "CARACT_SERVICO",
+            "GTR1018": "PAPEL_RECUP",
+            "GTR1019": "PLASTICO_RECUP",
+            "GTR1020": "METAL_RECUP",
+            "GTR1021": "VIDRO_RECUP",
+            "GTR1022": "OUTROS_RECUP",
+            "GTR1023*": "TOTAL_RECUP",
+            "GTR1024": "REJEITOS",
+        })
+        # Enviado para outro município (nome muda de 2023 p/ 2024)
+        for cand in ["Fluxo de resíduos", "Na rota declarada os resíduos são enviados para outro município?"]:
+            if cand in dc.columns:
+                dc = dc.rename(columns={cand: "ENVIADO_OUTRO"})
+                break
+        for c in ["MASSA_PUBLICA","MASSA_PRIVADA","MASSA_COOP_CONTR","MASSA_COOP_NAO",
+                  "MASSA_ROTA","PAPEL_RECUP","PLASTICO_RECUP","METAL_RECUP","VIDRO_RECUP",
+                  "OUTROS_RECUP","TOTAL_RECUP","REJEITOS"]:
+            if c in dc.columns: dc[c] = to_num(dc[c])
+        dc["CATEGORIA"] = dc["UNIDADE_DEST"].apply(classificar_destino) if "UNIDADE_DEST" in dc.columns else "Não informado"
+        dc["ANO"] = ano
+
+    # ---------- Veículos ----------
+    if not dv.empty:
+        dv = dv.rename(columns={
+            "Cod_IBGE": "COD_IBGE", "Nom_Mun": "MUNICIPIO", "UF": "UF",
+            "GTR1201*": "TIPO_VEICULO", "GTR1202*": "FAIXA_IDADE",
+            "GTR1203*": "PROPRIETARIO", "GTR1204*": "QTD",
+        })
+        if "QTD" in dv.columns: dv["QTD"] = to_num(dv["QTD"])
+        dv["ANO"] = ano
+
+    # ---------- Cooperativas ----------
+    if not dk.empty:
+        dk = dk.rename(columns={
+            "Cod_IBGE": "COD_IBGE", "Nom_Mun": "MUNICIPIO", "UF": "UF",
+            "GTR1300": "COD_COOP",
+            "GTR1302*": "NOME_COOP",
+            "GTR1303*": "SERVICOS",
+            "GTR1304*": "VINCULO",
+            "GTR1305": "REMUNERACAO",
+            "GTR1306*": "N_TRIAGEM",
+            "GTR1307*": "N_TOTAL",
+            "GTR1308": "CNPJ_COOP",
+        })
+        for c in ["REMUNERACAO","N_TRIAGEM","N_TOTAL"]:
+            if c in dk.columns: dk[c] = to_num(dk[c])
+        dk["ANO"] = ano
+
+    return {"residuos": dr, "coleta": dc, "veiculos": dv, "cooperativas": dk}
+
+# ---------------------------------------------------------
+# CARREGAR TUDO
+# ---------------------------------------------------------
+dados = {ano: consolidar_ano(ano) for ano in ANOS}
+dados = {a: d for a, d in dados.items() if d is not None}
+if not dados:
+    st.error("❌ Nenhum arquivo Excel encontrado. Coloque `rsuBrasil_2023.xlsx` e `rsuBrasil_2024.xlsx` na raiz do repositório (ou em `data/`).")
+    st.stop()
+
+ANOS_DISP = list(dados.keys())
+
+# ---------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------
+st.title("♻️ RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos")
 st.markdown("""
-Explore os dados dos anos **2023 e 2024** do SNIS (Módulo Manejo de Resíduos Sólidos).  
-Utilize os filtros e gráficos interativos para entender a situação dos resíduos no Brasil.
+Painel de **monitoramento** dos Resíduos Sólidos Urbanos (RSU) brasileiros, com base nos
+microdados do **SINISA** (Sistema Nacional de Informações sobre Saneamento).
+
+**Objetivo:** subsidiar o **Ministério do Meio Ambiente (MMA)** e demais órgãos no
+acompanhamento da **Política Nacional de Resíduos Sólidos (Lei 12.305/2010)**,
+do **PLANARES (Decreto 11.043/2022)** e das metas de universalização e recuperação.
 """)
 
-# =========================================================
-# FUNÇÕES DE FORMATAÇÃO BRASILEIRA (PADRÃO)
-# =========================================================
-def formatar_numero_br(valor, casas_decimais=None):
-    if pd.isna(valor) or valor is None:
-        return "N/A"
-    try:
-        valor = float(valor)
-        if casas_decimais is None:
-            if valor == int(valor):
-                casas_decimais = 0
-            else:
-                casas_decimais = 2
-        if casas_decimais == 0:
-            return f"{valor:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        else:
-            formato = f"{{:,.{casas_decimais}f}}"
-            return formato.format(valor).replace(",", "X").replace(".", ",").replace("X", ".")
-    except (ValueError, TypeError):
-        return "N/A"
+st.sidebar.header("⚙️ Filtros")
+ano_sel = st.sidebar.selectbox("Ano de referência:", ANOS_DISP, index=len(ANOS_DISP) - 1)
+ano_comp = st.sidebar.selectbox(
+    "Comparar com:",
+    ["—"] + [a for a in ANOS_DISP if a != ano_sel],
+    index=0,
+)
+uf_sel = st.sidebar.selectbox(
+    "Filtrar por Estado (UF):",
+    ["BRASIL – Todos"] + sorted(dados[ano_sel]["residuos"]["UF"].dropna().unique().tolist()),
+)
+reg_sel = st.sidebar.selectbox(
+    "Filtrar por Região:",
+    ["Todas"] + sorted(dados[ano_sel]["residuos"]["REGIAO"].dropna().unique().tolist()),
+)
 
-def formatar_metric(valor, casas=None):
-    return formatar_numero_br(valor, casas)
-
-# =========================================================
-# FUNÇÃO SEGURA PARA FORMATAR EIXOS DE GRÁFICOS
-# =========================================================
-def aplicar_formatacao(fig):
-    """Aplica formatação brasileira nos eixos do gráfico, ignorando erros."""
-    if fig is None:
-        return
-    try:
-        fig.update_yaxis(tickformat=',.0f')
-        fig.update_xaxis(tickformat=',.0f')
-    except Exception:
-        pass  # Silencia erros para não quebrar o app
-
-# =========================================================
-# CARREGAMENTO DOS ARQUIVOS (LOCAL)
-# =========================================================
-ARQUIVO_2023 = "rsuBrasil_2023.xlsx"
-ARQUIVO_2024 = "rsuBrasil_2024.xlsx"
-
-def verificar_arquivos():
-    if not os.path.exists(ARQUIVO_2023):
-        st.error(f"❌ Arquivo {ARQUIVO_2023} não encontrado. Coloque-o no mesmo diretório do app.")
-        return False
-    if not os.path.exists(ARQUIVO_2024):
-        st.error(f"❌ Arquivo {ARQUIVO_2024} não encontrado. Coloque-o no mesmo diretório do app.")
-        return False
-    return True
-
-if not verificar_arquivos():
-    st.stop()
-
-st.sidebar.success("✅ Arquivos encontrados!")
-
-# =========================================================
-# FUNÇÃO PARA LER ABA (BUSCA AUTOMÁTICA DO HEADER)
-# =========================================================
-def ler_aba(caminho, nome_aba):
-    try:
-        df_raw = pd.read_excel(caminho, sheet_name=nome_aba, header=None)
-        header_idx = None
-        for i, row in df_raw.iterrows():
-            row_str = row.astype(str).str.upper()
-            if row_str.str.contains("CÓDIGO DO IBGE", na=False).any() and \
-               (row_str.str.contains("MUNICÍPIO", na=False).any() or row_str.str.contains("MUNICIPIO", na=False).any()):
-                header_idx = i
-                break
-        if header_idx is None:
-            for i, row in df_raw.iterrows():
-                if row.astype(str).str.contains("MUNICÍPIO", case=False, na=False).any():
-                    header_idx = i
-                    break
-        if header_idx is not None:
-            df = pd.read_excel(caminho, sheet_name=nome_aba, header=header_idx)
-        else:
-            df = pd.read_excel(caminho, sheet_name=nome_aba, header=0)
-        df = df.dropna(how="all")
-        df = df.dropna(axis=1, how="all")
-        return df
-    except Exception as e:
-        st.error(f"Erro ao ler a aba '{nome_aba}': {e}")
-        return None
-
-# =========================================================
-# CARREGAR DADOS COM CACHE
-# =========================================================
-@st.cache_data
-def carregar_dados(ano):
-    caminho = ARQUIVO_2023 if ano == 2023 else ARQUIVO_2024
-    df_res = ler_aba(caminho, "Manejo_Resíduos_Sólidos_Urbanos")
-    df_col = ler_aba(caminho, "Manejo_Coleta_e_Destinação")
-    return df_res, df_col
-
-df_res_2023, df_col_2023 = carregar_dados(2023)
-df_res_2024, df_col_2024 = carregar_dados(2024)
-
-if df_res_2023 is None or df_res_2024 is None:
-    st.error("❌ Não foi possível carregar os dados. Verifique os arquivos.")
-    st.stop()
-
-# =========================================================
-# PRÉ-PROCESSAMENTO (PADRONIZAÇÃO DE COLUNAS)
-# =========================================================
-def padronizar_colunas(df):
-    if df is None:
-        return df
-    col_map = {}
-    for col in df.columns:
-        col_str = str(col).strip()
-        if "CÓDIGO DO IBGE" in col_str:
-            col_map[col] = "COD_IBGE"
-        elif "MUNICÍPIO" in col_str:
-            col_map[col] = "MUNICIPIO"
-        elif "UF" in col_str and col_str != "UF":
-            col_map[col] = "UF"
-        elif "MACRORREGIÃO" in col_str:
-            col_map[col] = "MACRO"
-        elif "POPULAÇÃO TOTAL" in col_str:
-            col_map[col] = "POP_TOTAL"
-        elif "POPULAÇÃO URBANA" in col_str:
-            col_map[col] = "POP_URBANA"
-        elif "POPULAÇÃO RURAL" in col_str:
-            col_map[col] = "POP_RURAL"
-        elif "Massa total anual proveniente das rotas de coleta de resíduos sólidos domiciliares" in col_str:
-            col_map[col] = "MASSA_DOMICILIAR"
-        elif "Massa total anual proveniente das rotas de coleta seletiva" in col_str:
-            col_map[col] = "MASSA_SELETIVA"
-        elif "Massa total anual proveniente das rotas de coleta de resíduos sólidos de limpeza urbana" in col_str:
-            col_map[col] = "MASSA_LIMPEZA"
-        elif "Massa total anual de resíduos sólidos urbanos" in col_str:
-            col_map[col] = "MASSA_TOTAL_RSU"
-        elif "Tipo de coleta executada" in col_str:
-            col_map[col] = "TIPO_COLETA"
-        elif "Tipo de unidade de destino" in col_str:
-            col_map[col] = "TIPO_DESTINO"
-        elif "Massa de resíduos sólidos total coletada" in col_str:
-            col_map[col] = "MASSA_ROTA"
-        elif "Quantidade total de veículos" in col_str:
-            col_map[col] = "QTD_VEICULOS"
-    if col_map:
-        df = df.rename(columns=col_map)
+# Aplicar filtros
+def filtrar(df, ano, col_uf="UF", col_reg="REGIAO"):
+    if df.empty: return df
+    if uf_sel != "BRASIL – Todos" and col_uf in df.columns:
+        df = df[df[col_uf] == uf_sel]
+    if reg_sel != "Todas" and col_reg in df.columns:
+        df = df[df[col_reg] == reg_sel]
     return df
 
-def converter_numericas(df):
-    if df is None:
-        return df
-    for col in df.columns:
-        if col in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO", "NATUREZA JURÍDICA", "CNPJ"]:
-            continue
-        if df[col].dtype == object:
-            try:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-            except:
-                pass
-    return df
-
-df_res_2023 = padronizar_colunas(df_res_2023)
-df_res_2023 = converter_numericas(df_res_2023)
-df_res_2024 = padronizar_colunas(df_res_2024)
-df_res_2024 = converter_numericas(df_res_2024)
-
-df_col_2023 = padronizar_colunas(df_col_2023)
-df_col_2023 = converter_numericas(df_col_2023)
-df_col_2024 = padronizar_colunas(df_col_2024)
-df_col_2024 = converter_numericas(df_col_2024)
-
-# =========================================================
-# SIDEBAR - FILTROS GLOBAIS
-# =========================================================
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Filtros")
-
-ano_base = st.sidebar.selectbox("Ano para análise detalhada", [2023, 2024], index=1)
-
-if ano_base == 2023:
-    df_res = df_res_2023
-    df_col = df_col_2023
-else:
-    df_res = df_res_2024
-    df_col = df_col_2024
-
-ufs = sorted(df_res["UF"].dropna().unique()) if "UF" in df_res.columns else []
-uf_selecionada = st.sidebar.selectbox("UF (opcional)", ["Todas"] + ufs)
-
-if "POP_TOTAL" in df_res.columns:
-    pop_min = int(df_res["POP_TOTAL"].min()) if not df_res["POP_TOTAL"].isna().all() else 0
-    pop_max = int(df_res["POP_TOTAL"].max()) if not df_res["POP_TOTAL"].isna().all() else 10000000
-    pop_range = st.sidebar.slider("Faixa de população (milhares)", 
-                                  min_value=max(0, pop_min//1000), 
-                                  max_value=pop_max//1000,
-                                  value=(max(0, pop_min//1000), pop_max//1000))
-    st.sidebar.caption(
-        "📌 **Como usar:** mova os limites do controle deslizante para selecionar a faixa de população (em milhares de habitantes) "
-        "dos municípios que você deseja analisar. Os valores mínimo e máximo são definidos automaticamente com base nos dados "
-        "carregados. Ao reduzir o intervalo, apenas os municípios com população dentro da faixa escolhida serão considerados nos "
-        "indicadores, tabelas e gráficos, o que permite, por exemplo, analisar exclusivamente cidades de médio ou grande porte."
-    )
-    pop_min_filt = pop_range[0] * 1000
-    pop_max_filt = pop_range[1] * 1000
-else:
-    pop_min_filt, pop_max_filt = 0, 1e12
-
-def filtrar_df(df):
-    if df is None:
-        return df
-    if "UF" in df.columns and uf_selecionada != "Todas":
-        df = df[df["UF"] == uf_selecionada]
-    if "POP_TOTAL" in df.columns:
-        # Mantém São Paulo (COD_IBGE 3550308) independente da faixa populacional
-        cond = ((df["POP_TOTAL"] >= pop_min_filt) & (df["POP_TOTAL"] <= pop_max_filt)) | (df["COD_IBGE"] == 3550308)
-        df = df[cond]
-    return df
-
-df_res_filt = filtrar_df(df_res)
-df_col_filt = filtrar_df(df_col)
+dr = filtrar(dados[ano_sel]["residuos"], ano_sel)
+dc = filtrar(dados[ano_sel]["coleta"], ano_sel)
 
 # =========================================================
 # ABAS
 # =========================================================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📌 Visão Geral",
-    "🏙️ Municípios",
-    "🚚 Rotas de Coleta",
-    "♻️ Destinação",
-    "📈 Comparação 2023↔2024"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "🇧🇷 Painel Nacional",
+    "🗺️ Análise Territorial",
+    "🚛 Coleta e Cobertura",
+    "🏭 Destinação Final",
+    "♻️ Recuperação de Materiais",
+    "👥 Inclusão Socioprodutiva",
+    "📥 Dados e Exportação",
 ])
 
-# =========================================================
-# TAB 1 - VISÃO GERAL (COM OPÇÃO DE EXCLUIR TRANSBORDO)
-# =========================================================
+# ---------------------------------------------------------
+# TAB 1 — PAINEL NACIONAL
+# ---------------------------------------------------------
 with tab1:
-    st.header("📌 Visão Geral dos Dados")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total de municípios", 
-          f"{df_res_filt.shape[0]:,}".replace(",", ".") if df_res_filt is not None else "0")
-    
-    
-    with col2:
-        if "UF" in df_res_filt.columns:
-            st.metric("Unidades Federativas (UF)", df_res_filt["UF"].nunique())
-    with col3:
-        if "POP_TOTAL" in df_res_filt.columns:
-            pop_total = df_res_filt["POP_TOTAL"].sum()
-            st.metric("População total", formatar_metric(pop_total, 0))
+    st.subheader(f"Painel Nacional — SINISA {ano_sel}")
 
-    if df_res_filt is not None and not df_res_filt.empty:
+    pop_total   = dr["POP_TOTAL"].sum()
+    massa_total = dr["MASSA_TOTAL"].sum()
+    massa_recup = dr["MASSA_RECUPERADA"].sum()
+    n_mun       = dr["COD_IBGE"].nunique()
+    n_coop      = dr["N_COOP"].sum()
+    per_cap     = (massa_total / pop_total * 1000) if pop_total > 0 else 0
+    per_cap_dia = per_cap / 365
+    taxa_recup  = (massa_recup / massa_total * 100) if massa_total > 0 else 0
+
+    # Métrica de destinação adequada (por massa)
+    if not dc.empty and "MASSA_ROTA" in dc.columns:
+        massa_rota_total = dc["MASSA_ROTA"].sum()
+        massa_adequada   = dc[dc["CATEGORIA"] == "Adequado"]["MASSA_ROTA"].sum()
+        massa_inadequada = dc[dc["CATEGORIA"] == "Inadequado"]["MASSA_ROTA"].sum()
+        pct_adequada     = (massa_adequada / massa_rota_total * 100) if massa_rota_total > 0 else 0
+        pct_inadequada   = (massa_inadequada / massa_rota_total * 100) if massa_rota_total > 0 else 0
+        n_mun_lixao      = dc[dc["UNIDADE_DEST"].astype(str).str.contains("Lixão|Vazadouro", case=False, na=False)]["COD_IBGE"].nunique()
+    else:
+        massa_rota_total = massa_adequada = massa_inadequada = 0
+        pct_adequada = pct_inadequada = 0
+        n_mun_lixao = 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🏙️ Municípios que reportaram", f"{n_mun:,}".replace(",", "."))
+    c2.metric("👥 População coberta", f"{fmt_br(pop_total)} hab")
+    c3.metric("⚖️ Massa total coletada", f"{fmt_br(massa_total)} t/ano")
+    c4.metric("📊 Per capita", f"{fmt_br(per_cap, 0)} kg/hab/ano",
+              help=f"= {fmt_br(per_cap_dia, 2)} kg/hab/dia")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("♻️ Taxa de recuperação", f"{fmt_br(taxa_recup, 2)}%",
+              help="(Massa recuperada / Massa total) × 100 — PLANARES: 48% até 2040")
+    c2.metric("✅ Massa p/ destinação adequada", f"{fmt_br(pct_adequada, 1)}%")
+    c3.metric("🚨 Massa p/ destinação inadequada", f"{fmt_br(pct_inadequada, 1)}%",
+              help="Aterro controlado + Lixão/vazadouro")
+    c4.metric("⚠️ Municípios com lixão ativo", f"{n_mun_lixao:,}".replace(",", "."))
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🏭 Cooperativas/associações", f"{fmt_br(n_coop)}")
+    c2.metric("👷 Catadores organizados", f"{fmt_br(dr['CATADORES_ORG'].sum())}")
+    c3.metric("🚛 Veículos na frota", f"{fmt_br(dr['N_VEICULOS'].sum())}")
+    c4.metric("📚 Municípios c/ estudo de caracterização",
+              f"{(dr['ESTUDO_CARACT'].astype(str).str.strip()=='Sim').sum():,}".replace(",", "."))
+
+    # ---------- Comparação 2023 → 2024 ----------
+    if ano_comp != "—" and ano_comp in dados:
         st.markdown("---")
-        
-        # ===== NOVO: checkbox para excluir transbordo nos indicadores =====
-        usar_dados_coleta = st.checkbox(
-            "Excluir transbordos dos indicadores (usar dados das rotas de coleta)",
-            value=False,
-            help="Quando ativado, os indicadores são calculados a partir das rotas de coleta, excluindo destinos do tipo 'Transbordo' para evitar dupla contagem."
-        )
-        st.markdown("---")
+        st.subheader(f"📈 Evolução {ano_comp} → {ano_sel}")
+        dr_c = dados[ano_comp]["residuos"]
+        dc_c = dados[ano_comp]["coleta"]
 
-        st.subheader("📊 Indicadores de Gestão")
+        pop_c   = dr_c["POP_TOTAL"].sum()
+        massa_c = dr_c["MASSA_TOTAL"].sum()
+        recup_c = dr_c["MASSA_RECUPERADA"].sum()
+        pc_c    = (massa_c / pop_c * 1000) if pop_c > 0 else 0
+        tx_c    = (recup_c / massa_c * 100) if massa_c > 0 else 0
 
-        # --- Determinação das massas conforme a escolha ---
-        if usar_dados_coleta and df_col_filt is not None and not df_col_filt.empty:
-            # Usa dados das rotas de coleta, excluindo transbordo
-            df_rotas = df_col_filt.copy()
-            
-            # ========== CORREÇÃO APLICADA ==========
-            # Filtrar apenas municípios que estão em df_res_filt (respeita filtros populacionais/UF)
-            if "COD_IBGE" in df_res_filt.columns and "COD_IBGE" in df_rotas.columns:
-                codigos_validos = df_res_filt["COD_IBGE"].dropna().unique()
-                df_rotas = df_rotas[df_rotas["COD_IBGE"].isin(codigos_validos)]
-            # =======================================
+        if not dc_c.empty and "MASSA_ROTA" in dc_c.columns:
+            mt_c = dc_c["MASSA_ROTA"].sum()
+            mad_c = dc_c[dc_c["CATEGORIA"] == "Adequado"]["MASSA_ROTA"].sum()
+            pct_ad_c = (mad_c / mt_c * 100) if mt_c > 0 else 0
+        else:
+            pct_ad_c = 0
 
-            if "TIPO_DESTINO" in df_rotas.columns:
-                df_rotas['destino_norm'] = df_rotas['TIPO_DESTINO'].astype(str).apply(
-                    lambda x: unicodedata.normalize('NFKD', x).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
-                    if pd.notna(x) else ''
-                )
-                df_rotas = df_rotas[~df_rotas['destino_norm'].str.contains('TRANSBORDO', na=False)]
-                df_rotas = df_rotas.drop(columns=['destino_norm'])
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Massa total", f"{fmt_br(massa_total)} t",
+                  delta=f"{fmt_br(massa_total - massa_c)} t")
+        c2.metric("Per capita", f"{fmt_br(per_cap, 0)} kg/hab/ano",
+                  delta=f"{fmt_br(per_cap - pc_c, 0)} kg/hab/ano")
+        c3.metric("Taxa de recuperação", f"{fmt_br(taxa_recup, 2)}%",
+                  delta=f"{fmt_br(taxa_recup - tx_c, 2)} p.p.")
+        c4.metric("% destinação adequada", f"{fmt_br(pct_adequada, 1)}%",
+                  delta=f"{fmt_br(pct_adequada - pct_ad_c, 1)} p.p.")
 
-            if "MASSA_ROTA" in df_rotas.columns:
-                massa_total_ton = df_rotas["MASSA_ROTA"].sum()
-                # Massa seletiva: rotas cujo tipo de coleta contenha "seletiva"
-                if "TIPO_COLETA" in df_rotas.columns:
-                    mask_seletiva = df_rotas["TIPO_COLETA"].astype(str).str.contains("seletiva", case=False, na=False)
-                    massa_seletiva = df_rotas.loc[mask_seletiva, "MASSA_ROTA"].sum()
-                else:
-                    massa_seletiva = 0
-                if massa_total_ton == 0 or pd.isna(massa_total_ton):
-                    usar_dados_coleta = False  # fallback
-                    st.warning("Dados de coleta insuficientes. Usando dados agregados dos municípios.")
-            else:
-                usar_dados_coleta = False
-                st.warning("Coluna 'MASSA_ROTA' não encontrada. Usando dados agregados.")
+    st.caption("📌 Fonte: SINISA — Sistema Nacional de Informações sobre Saneamento (módulo Resíduos Sólidos). "
+               "Dados autorreportados pelos municípios.")
 
-        if not usar_dados_coleta:
-            # Usa os dados agregados da tabela de resíduos (comportamento original)
-            if "MASSA_TOTAL_RSU" in df_res_filt.columns:
-                massa_total_ton = df_res_filt["MASSA_TOTAL_RSU"].sum()
-            else:
-                massa_total_ton = 0
-            if "MASSA_SELETIVA" in df_res_filt.columns:
-                massa_seletiva = df_res_filt["MASSA_SELETIVA"].sum()
-            else:
-                massa_seletiva = 0
-
-        # --- Cálculos e exibição (idênticos ao original) ---
-        if massa_total_ton > 0 and pop_total > 0:
-            massa_total_kg = massa_total_ton * 1000
-            per_capita_ano = massa_total_kg / pop_total
-            per_capita_dia = per_capita_ano / 365
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric(
-                    "Geração per capita (kg/hab/ano)",
-                    formatar_metric(per_capita_ano, 2),
-                    help="Calculado como: Massa total de RSU (kg) / População total. Fonte: SNIS."
-                )
-                st.caption("📌 **Fórmula:** Massa total (kg) ÷ População total = kg/hab/ano")
-                st.caption(f"📌 **Dados usados:** Massa total = {formatar_metric(massa_total_ton, 0)} t = {formatar_metric(massa_total_kg, 0)} kg; População = {formatar_metric(pop_total, 0)} hab")
-
-            with col2:
-                st.metric(
-                    "Geração per capita (kg/hab/dia)",
-                    formatar_metric(per_capita_dia, 3),
-                    help="Calculado como: Geração anual (kg/hab/ano) / 365 dias. Fonte: SNIS."
-                )
-                st.caption("📌 **Fórmula:** Geração anual (kg/hab/ano) ÷ 365 = kg/hab/dia")
-                st.caption(f"📌 **Cálculo:** {formatar_metric(per_capita_ano, 4)} kg/hab/ano ÷ 365 = {formatar_metric(per_capita_dia, 4)} kg/hab/dia")
-
-        # Taxa de coleta seletiva
-        if massa_total_ton > 0:
-            taxa_cobertura = (massa_seletiva / massa_total_ton) * 100 if massa_total_ton > 0 else 0
-            st.metric(
-                "Taxa de coleta seletiva (%)",
-                formatar_metric(taxa_cobertura, 2),
-                help="Percentual da massa total que é coletada seletivamente. Fonte: SNIS."
-            )
-            st.caption("📌 **Fórmula:** (Massa coletada seletivamente ÷ Massa total de RSU) × 100")
-            st.caption(f"📌 **Dados:** Massa seletiva = {formatar_metric(massa_seletiva, 0)} t; Massa total = {formatar_metric(massa_total_ton, 0)} t")
-
-        # Ranking de maior e menor massa (inalterado)
-        if "MASSA_TOTAL_RSU" in df_res_filt.columns and "MUNICIPIO" in df_res_filt.columns:
-            df_rank = df_res_filt.dropna(subset=["MASSA_TOTAL_RSU"])
-            if not df_rank.empty:
-                maior = df_rank.loc[df_rank["MASSA_TOTAL_RSU"].idxmax()]
-                menor = df_rank.loc[df_rank["MASSA_TOTAL_RSU"].idxmin()]
-                col1, col2 = st.columns(2)
-                col1.metric(
-                    "🏆 Maior massa",
-                    f"{maior['MUNICIPIO']} ({maior['UF']})",
-                    f"{formatar_metric(maior['MASSA_TOTAL_RSU'], 0)} t"
-                )
-                col2.metric(
-                    "📉 Menor massa",
-                    f"{menor['MUNICIPIO']} ({menor['UF']})",
-                    f"{formatar_metric(menor['MASSA_TOTAL_RSU'], 0)} t"
-                )
-                col1.caption(f"📌 Fonte: SNIS - município com maior massa declarada.")
-                col2.caption(f"📌 Fonte: SNIS - município com menor massa declarada.")
-
-    st.markdown("---")
-    
-    # Gráficos (exatamente como estavam)
-    if "UF" in df_res_filt.columns:
-        st.markdown("**Distribuição dos municípios por estado.** Este gráfico mostra quantos municípios estão presentes na base de dados para cada Unidade Federativa. Permite identificar a cobertura do SNIS e eventuais discrepâncias regionais.")
-        uf_counts = df_res_filt["UF"].value_counts().reset_index()
-        uf_counts.columns = ["UF", "Quantidade"]
-        fig_uf = px.bar(uf_counts, x="UF", y="Quantidade", title="Número de municípios por UF",
-                        color="Quantidade", color_continuous_scale="Blues", height=500)
-        aplicar_formatacao(fig_uf)
-        if fig_uf is not None:
-            fig_uf.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_uf, use_container_width=True)
-
-    if "POP_TOTAL" in df_res_filt.columns:
-        st.markdown("**Distribuição da população dos municípios.** O histograma agrupa os municípios por faixas de população. Ajuda a entender se a base é composta majoritariamente por municípios pequenos, médios ou grandes, influenciando a interpretação de médias per capita.")
-        fig_pop = px.histogram(df_res_filt, x="POP_TOTAL", nbins=50, 
-                               title="Distribuição da população dos municípios",
-                               labels={"POP_TOTAL": "População"},
-                               color_discrete_sequence=["#2E86C1"], height=500)
-        aplicar_formatacao(fig_pop)
-        if fig_pop is not None:
-            st.plotly_chart(fig_pop, use_container_width=True)
-
-    if "UF" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
-        st.markdown("**Top 10 UF com maior massa de RSU.** Agrega a massa total de resíduos sólidos urbanos declarada por município, somando por estado. Reflete tanto o tamanho da população quanto a intensidade da geração de resíduos em cada UF.")
-        uf_massa = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
-        uf_massa = uf_massa.sort_values("MASSA_TOTAL_RSU", ascending=False).head(10)
-        fig_massa = px.bar(uf_massa, x="UF", y="MASSA_TOTAL_RSU", title="Top 10 UFs - Massa total de RSU",
-                           labels={"MASSA_TOTAL_RSU": "Massa (t)"},
-                           color="MASSA_TOTAL_RSU", color_continuous_scale="Greens", height=500)
-        aplicar_formatacao(fig_massa)
-        if fig_massa is not None:
-            fig_massa.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_massa, use_container_width=True)
-
-# =========================================================
-# TAB 2 - MUNICÍPIOS (INALTERADA)
-# =========================================================
+# ---------------------------------------------------------
+# TAB 2 — ANÁLISE TERRITORIAL
+# ---------------------------------------------------------
 with tab2:
-    st.header("🏙️ Análise por Município")
-    if df_res_filt is not None and not df_res_filt.empty:
-        cols_disponiveis = df_res_filt.columns.tolist()
-        cols_para_exibir = st.multiselect(
-            "Selecione as colunas para exibir na tabela",
-            cols_disponiveis,
-            default=[c for c in ["MUNICIPIO", "UF", "POP_TOTAL", "MASSA_TOTAL_RSU", "MASSA_SELETIVA"] if c in cols_disponiveis]
+    st.subheader("🗺️ Análise Territorial — Região e Estado")
+
+    # Por região
+    reg = dr.groupby("REGIAO", dropna=False).agg(
+        MUNICIPIOS=("COD_IBGE", "nunique"),
+        POPULACAO=("POP_TOTAL", "sum"),
+        MASSA=("MASSA_TOTAL", "sum"),
+        RECUPERADA=("MASSA_RECUPERADA", "sum"),
+    ).reset_index()
+    reg["PER_CAPITA"] = (reg["MASSA"] / reg["POPULACAO"] * 1000).round(0)
+    reg["TAXA_RECUP"] = (reg["RECUPERADA"] / reg["MASSA"] * 100).round(2)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = px.bar(
+            reg.sort_values("MASSA", ascending=True),
+            x="MASSA", y="REGIAO", orientation="h",
+            color="REGIAO", color_discrete_map=CORES_REGIAO,
+            title="Massa total coletada por região (t/ano)",
+            labels={"MASSA": "Massa (t/ano)", "REGIAO": ""},
         )
-        if cols_para_exibir:
-            st.markdown("**Dados municipais.** Tabela interativa com as colunas selecionadas. Use-a para explorar os valores brutos de cada município, ordenar e filtrar visualmente. Os números são exibidos com separador de milhar brasileiro.")
-            df_tab = df_res_filt[cols_para_exibir].copy()
-            for col in df_tab.columns:
-                if col not in ["MUNICIPIO", "UF", "MACRO"]:
-                    df_tab[col] = df_tab[col].apply(lambda x: formatar_metric(x, 0) if pd.notna(x) else "")
-            st.dataframe(df_tab, use_container_width=True, height=400, hide_index=True)
+        fig.update_layout(showlegend=False, height=380)
+        st.plotly_chart(fig, use_container_width=True)
 
-        if "POP_TOTAL" in df_res_filt.columns and "MASSA_TOTAL_RSU" in df_res_filt.columns:
-            st.markdown("**População × Massa de RSU.** Cada ponto representa um município. A relação esperada é positiva (mais habitantes geram mais resíduos). Pontos muito afastados da tendência podem indicar erros de declaração ou particularidades locais.")
-            fig_scatter = px.scatter(df_res_filt, x="POP_TOTAL", y="MASSA_TOTAL_RSU", 
-                                     hover_data=["MUNICIPIO", "UF"],
-                                     title="Relação População vs Massa de RSU",
-                                     labels={"POP_TOTAL": "População", "MASSA_TOTAL_RSU": "Massa (t)"},
-                                     color="UF" if "UF" in df_res_filt.columns else None, height=500)
-            aplicar_formatacao(fig_scatter)
-            if fig_scatter is not None:
-                st.plotly_chart(fig_scatter, use_container_width=True)
+    with c2:
+        fig = px.bar(
+            reg.sort_values("PER_CAPITA", ascending=True),
+            x="PER_CAPITA", y="REGIAO", orientation="h",
+            color="REGIAO", color_discrete_map=CORES_REGIAO,
+            title="Per capita por região (kg/hab/ano)",
+            labels={"PER_CAPITA": "kg/hab/ano", "REGIAO": ""},
+        )
+        fig.update_layout(showlegend=False, height=380)
+        st.plotly_chart(fig, use_container_width=True)
 
-# =========================================================
-# TAB 3 - ROTAS DE COLETA (INALTERADA)
-# =========================================================
-with tab3:
-    st.header("🚚 Análise das Rotas de Coleta")
-    if df_col_filt is not None and not df_col_filt.empty:
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de rotas", df_col_filt.shape[0])
-        if "MASSA_ROTA" in df_col_filt.columns:
-            col2.metric("Massa total nas rotas", f"{formatar_metric(df_col_filt['MASSA_ROTA'].sum(), 0)} t")
-        if "TIPO_COLETA" in df_col_filt.columns:
-            col3.metric("Tipos de coleta distintos", df_col_filt["TIPO_COLETA"].nunique())
-
-        if "TIPO_COLETA" in df_col_filt.columns:
-            st.markdown("**Frequência dos tipos de coleta.** Mostra quantas rotas são classificadas em cada categoria (ex.: coleta domiciliar, seletiva, etc.). Reflete a diversidade ou predominância de certos modelos de coleta no conjunto de dados.")
-            freq = df_col_filt["TIPO_COLETA"].value_counts().reset_index()
-            freq.columns = ["Tipo", "Quantidade"]
-            fig_freq = px.bar(freq, x="Tipo", y="Quantidade", title="Frequência dos tipos de coleta",
-                              color="Quantidade", color_continuous_scale="Viridis", height=500)
-            aplicar_formatacao(fig_freq)
-            if fig_freq is not None:
-                fig_freq.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig_freq, use_container_width=True)
-
-        if "MASSA_ROTA" in df_col_filt.columns and "TIPO_COLETA" in df_col_filt.columns:
-            st.markdown("**Massa coletada por tipo de coleta.** O gráfico de rosca revela a participação de cada tipo de coleta na massa total registrada. A coleta domiciliar (convencional) costuma dominar; a fatia da coleta seletiva indica o avanço da reciclagem.")
-            mass_tipo = df_col_filt.groupby("TIPO_COLETA")["MASSA_ROTA"].sum().reset_index()
-            mass_tipo = mass_tipo.sort_values("MASSA_ROTA", ascending=False)
-            fig_pie = px.pie(mass_tipo, values="MASSA_ROTA", names="TIPO_COLETA", 
-                             title="Massa coletada por tipo de coleta", hole=0.4, height=500)
-            if fig_pie is not None:
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-        st.subheader("🔍 Amostra das rotas")
-        st.markdown("**Amostra de 100 rotas.** Visualização parcial da tabela de rotas de coleta. Útil para inspecionar dados brutos, verificar preenchimento e consistência dos campos. Colunas numéricas são formatadas no padrão brasileiro.")
-        df_amostra = df_col_filt.head(100).copy()
-        for col in df_amostra.columns:
-            if col not in ["COD_IBGE", "MUNICIPIO", "UF", "MACRO", "TIPO_COLETA", "TIPO_DESTINO"]:
-                df_amostra[col] = df_amostra[col].apply(lambda x: formatar_metric(x, 0) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        st.dataframe(df_amostra, use_container_width=True, height=300, hide_index=True)
-
-# =========================================================
-# TAB 4 - DESTINAÇÃO (INALTERADA)
-# =========================================================
-with tab4:
-    st.header("♻️ Análise da Destinação dos Resíduos")
-    
-    excluir_transbordo = st.checkbox(
-        "Excluir rotas de transbordo da análise (recomendado para evitar dupla contagem)", 
-        value=True
+    st.markdown("#### 📋 Indicadores consolidados por região")
+    st.dataframe(
+        reg.style.format({
+            "MUNICIPIOS": "{:,.0f}",
+            "POPULACAO":  "{:,.0f}",
+            "MASSA":      "{:,.0f}",
+            "RECUPERADA": "{:,.0f}",
+            "PER_CAPITA": "{:,.0f}",
+            "TAXA_RECUP": "{:.2f}%",
+        }),
+        use_container_width=True,
     )
 
-    df_destino = df_col_filt.copy()
-    if excluir_transbordo:
-        if "TIPO_DESTINO" in df_destino.columns:
-            df_destino['destino_norm'] = df_destino['TIPO_DESTINO'].astype(str).apply(
-                lambda x: unicodedata.normalize('NFKD', x).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
-                if pd.notna(x) else ''
-            )
-            df_destino = df_destino[~df_destino['destino_norm'].str.contains('TRANSBORDO', na=False)]
-            df_destino = df_destino.drop(columns=['destino_norm'])
-        else:
-            st.warning("Coluna 'TIPO_DESTINO' não encontrada.")
+    st.markdown("---")
+    st.markdown("#### 🏆 Ranking por Estado (UF)")
+    uf = dr.groupby("UF", dropna=False).agg(
+        MUNICIPIOS=("COD_IBGE", "nunique"),
+        POPULACAO=("POP_TOTAL", "sum"),
+        MASSA=("MASSA_TOTAL", "sum"),
+        RECUPERADA=("MASSA_RECUPERADA", "sum"),
+    ).reset_index()
+    uf["PER_CAPITA"] = (uf["MASSA"] / uf["POPULACAO"] * 1000).round(0)
+    uf["TAXA_RECUP"] = (uf["RECUPERADA"] / uf["MASSA"] * 100).round(2)
+    uf = uf.sort_values("MASSA", ascending=False)
 
-    if df_destino is not None and not df_destino.empty:
-        if "TIPO_DESTINO" in df_destino.columns:
-            destinos = df_destino["TIPO_DESTINO"].value_counts().reset_index()
-            destinos.columns = ["Destino", "Quantidade"]
-            if "MASSA_ROTA" in df_destino.columns:
-                st.markdown("**Massa destinada por tipo de destino.** Exibe a quantidade de resíduos (em toneladas) encaminhada para cada tipo de unidade (aterro, lixão, reciclagem, etc.). A exclusão de transbordos evita que a mesma carga seja contada múltiplas vezes.")
-                mass_dest = df_destino.groupby("TIPO_DESTINO")["MASSA_ROTA"].sum().reset_index()
-                mass_dest = mass_dest.sort_values("MASSA_ROTA", ascending=False)
-                fig_dest = px.bar(mass_dest, x="TIPO_DESTINO", y="MASSA_ROTA", 
-                                  title="Massa destinada por tipo (dados de coleta)",
-                                  labels={"MASSA_ROTA": "Massa (t)"},
-                                  color="MASSA_ROTA", color_continuous_scale="Viridis", height=500)
-                aplicar_formatacao(fig_dest)
-                if fig_dest is not None:
-                    fig_dest.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
-                    st.plotly_chart(fig_dest, use_container_width=True)
-                
-                st.markdown("**Percentual da massa destinada por tipo.** Este gráfico mostra a distribuição percentual da massa total encaminhada para cada destino. Facilita a comparação relativa entre as diferentes formas de destinação, independentemente do volume absoluto.")
-                mass_dest['Percentual'] = (mass_dest['MASSA_ROTA'] / mass_dest['MASSA_ROTA'].sum()) * 100
-                fig_perc = px.bar(mass_dest, x="TIPO_DESTINO", y="Percentual",
-                                  title="Percentual da massa destinada por tipo",
-                                  labels={"Percentual": "Percentual (%)", "TIPO_DESTINO": "Tipo de Destino"},
-                                  color="Percentual", color_continuous_scale="Viridis", height=500)
-                if fig_perc is not None:
-                    fig_perc.update_layout(yaxis_tickformat='.1f')
-                    fig_perc.update_layout(xaxis_tickangle=45, margin=dict(l=20, r=20, t=40, b=20))
-                    st.plotly_chart(fig_perc, use_container_width=True)
-            else:
-                fig_dest = px.pie(destinos, values="Quantidade", names="Destino",
-                                  title="Distribuição dos tipos de destino (contagem de rotas)", height=500)
-                if fig_dest is not None:
-                    st.plotly_chart(fig_dest, use_container_width=True)
+    top = uf.head(27)
+    fig = px.treemap(
+        top, path=["UF"], values="MASSA", color="TAXA_RECUP",
+        color_continuous_scale="RdYlGn",
+        title="Massa por UF (cor = taxa de recuperação %)",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("📊 Distribuição da Massa por Estado")
-        
-        if "MASSA_ROTA" in df_destino.columns:
-            uf_mass = df_destino.groupby("UF")["MASSA_ROTA"].sum().reset_index()
-        else:
-            uf_mass = pd.DataFrame()
-        
-        if uf_mass.empty or uf_mass["MASSA_ROTA"].sum() == 0:
-            if "MASSA_TOTAL_RSU" in df_res_filt.columns and "UF" in df_res_filt.columns:
-                uf_mass = df_res_filt.groupby("UF")["MASSA_TOTAL_RSU"].sum().reset_index()
-                uf_mass.columns = ["UF", "MASSA_ROTA"]
-                st.info("📊 Exibindo massa total de RSU (dados da tabela de resíduos, pois 'MASSA_ROTA' não tem dados suficientes)")
-            else:
-                uf_mass = pd.DataFrame()
-        
-        if not uf_mass.empty:
-            uf_mass = uf_mass.dropna(subset=["UF", "MASSA_ROTA"])
-            uf_mass = uf_mass[uf_mass["MASSA_ROTA"] > 0]
-            if not uf_mass.empty:
-                st.markdown("**Massa coletada por estado (destinação).** Agregação da massa por UF, permitindo comparar o volume total de resíduos que chega aos destinos finais em cada estado. Pode diferir dos totais da aba Visão Geral quando se usam fontes de dados distintas (tabela de resíduos vs. coleta).")
-                fig_bar = px.bar(
-                    uf_mass.sort_values("MASSA_ROTA", ascending=False),
-                    x="UF",
-                    y="MASSA_ROTA",
-                    title="Massa coletada por estado",
-                    labels={"MASSA_ROTA": "Massa (t)"},
-                    color="MASSA_ROTA",
-                    color_continuous_scale="Viridis",
-                    height=500
-                )
-                aplicar_formatacao(fig_bar)
-                if fig_bar is not None:
-                    fig_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-                    st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                st.info("Todos os valores de massa são zero ou nulos. Não há dados para exibir.")
-        else:
-            st.warning("Não foi possível encontrar uma coluna de massa para a análise.")
+    st.dataframe(
+        uf.style.format({
+            "MUNICIPIOS": "{:,.0f}", "POPULACAO": "{:,.0f}",
+            "MASSA": "{:,.0f}", "RECUPERADA": "{:,.0f}",
+            "PER_CAPITA": "{:,.0f}", "TAXA_RECUP": "{:.2f}%",
+        }),
+        use_container_width=True, height=400,
+    )
+
+# ---------------------------------------------------------
+# TAB 3 — COLETA E COBERTURA
+# ---------------------------------------------------------
+with tab3:
+    st.subheader("🚛 Coleta e Cobertura")
+
+    if dc.empty:
+        st.info("Sem dados de coleta para o filtro selecionado.")
     else:
-        st.info("Nenhum dado disponível para a análise de destinação.")
+        # Tipos de coleta
+        tipos = dc.groupby("TIPO_COLETA", dropna=False).agg(
+            ROTAS=("COD_ROTA", "nunique"),
+            MASSA=("MASSA_ROTA", "sum"),
+            MUNICIPIOS=("COD_IBGE", "nunique"),
+        ).reset_index().sort_values("MASSA", ascending=False)
+        tipos["%"] = (tipos["MASSA"] / tipos["MASSA"].sum() * 100).round(2)
 
-# =========================================================
-# TAB 5 - COMPARAÇÃO 2023 vs 2024 (INALTERADA)
-# =========================================================
-with tab5:
-    st.header("📈 Comparação entre 2023 e 2024")
-    
-    def get_metric(df, col):
-        if df is not None and col in df.columns:
-            return df[col].sum()
-        return np.nan
-    
-    massas = {
-        "2023": get_metric(df_res_2023, "MASSA_TOTAL_RSU"),
-        "2024": get_metric(df_res_2024, "MASSA_TOTAL_RSU")
-    }
-    pops = {
-        "2023": get_metric(df_res_2023, "POP_TOTAL"),
-        "2024": get_metric(df_res_2024, "POP_TOTAL")
-    }
-    
-    if not np.isnan(massas["2023"]) and not np.isnan(massas["2024"]) and massas["2023"] > 0:
-        var_massa = ((massas["2024"] - massas["2023"]) / massas["2023"]) * 100
-        st.metric(
-            "Variação da massa total",
-            f"{formatar_metric(var_massa, 2)}%",
-            help="Calculado como: ((Massa 2024 - Massa 2023) / Massa 2023) × 100"
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            fig = px.pie(
+                tipos, names="TIPO_COLETA", values="MASSA",
+                title="Massa por tipo de coleta",
+                hole=0.45,
+            )
+            fig.update_traces(textposition="inside", textinfo="percent+label")
+            fig.update_layout(height=450, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            fig = px.bar(
+                tipos.head(8).sort_values("MASSA"),
+                x="MASSA", y="TIPO_COLETA", orientation="h",
+                title="Massa por tipo de coleta (t/ano)",
+                labels={"MASSA": "t/ano", "TIPO_COLETA": ""},
+            )
+            fig.update_layout(height=450, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.dataframe(
+            tipos.style.format({"MASSA": "{:,.0f}", "ROTAS": "{:,.0f}",
+                                "MUNICIPIOS": "{:,.0f}", "%": "{:.2f}%"}),
+            use_container_width=True,
         )
-        st.caption("📌 **Fórmula:** (Massa 2024 - Massa 2023) ÷ Massa 2023 × 100")
-        st.caption(f"📌 **Dados:** 2023 = {formatar_metric(massas['2023'], 0)} t; 2024 = {formatar_metric(massas['2024'], 0)} t")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Massa total de RSU por ano.** Comparação direta da soma nacional (ou filtrada) da massa de resíduos. A variação pode refletir mudanças populacionais, econômicas ou de cobertura da base de dados.")
-        fig_massa = px.bar(x=list(massas.keys()), y=list(massas.values()),
-                           title="Massa total de RSU (t)",
-                           labels={"x": "Ano", "y": "Massa (t)"},
-                           color=list(massas.keys()),
-                           color_discrete_sequence=["#1f77b4", "#ff7f0e"],
-                           height=500)
-        aplicar_formatacao(fig_massa)
-        if fig_massa is not None:
-            st.plotly_chart(fig_massa, use_container_width=True)
 
-    with col2:
-        st.markdown("**População total por ano.** Evolução do somatório da população dos municípios da base. Alterações podem decorrer de crescimento vegetativo, migração ou simplesmente de diferenças na quantidade de municípios declarantes entre os anos.")
-        fig_pop = px.bar(x=list(pops.keys()), y=list(pops.values()),
-                         title="População total",
-                         labels={"x": "Ano", "y": "População"},
-                         color=list(pops.keys()),
-                         color_discrete_sequence=["#2ca02c", "#d62728"],
-                         height=500)
-        aplicar_formatacao(fig_pop)
-        if fig_pop is not None:
-            st.plotly_chart(fig_pop, use_container_width=True)
-    
-    if "TIPO_COLETA" in df_col_2023.columns and "TIPO_COLETA" in df_col_2024.columns:
-        st.subheader("📋 Evolução dos Tipos de Coleta")
-        st.markdown("**Comparação da quantidade de rotas por tipo entre 2023 e 2024.** Permite identificar mudanças na estrutura de coleta, como aumento de rotas seletivas ou alterações na classificação dos serviços.")
-        freq_2023 = df_col_2023["TIPO_COLETA"].value_counts().reset_index()
-        freq_2023.columns = ["Tipo", "2023"]
-        freq_2024 = df_col_2024["TIPO_COLETA"].value_counts().reset_index()
-        freq_2024.columns = ["Tipo", "2024"]
-        freq_comp = pd.merge(freq_2023, freq_2024, on="Tipo", how="outer").fillna(0)
-        fig_comp = go.Figure()
-        fig_comp.add_trace(go.Bar(x=freq_comp["Tipo"], y=freq_comp["2023"], name="2023", marker_color="#1f77b4"))
-        fig_comp.add_trace(go.Bar(x=freq_comp["Tipo"], y=freq_comp["2024"], name="2024", marker_color="#ff7f0e"))
-        fig_comp.update_layout(title="Comparação de tipos de coleta", xaxis_tickangle=45, barmode="group",
-                               height=500, margin=dict(l=20, r=20, t=40, b=20))
-        aplicar_formatacao(fig_comp)
-        st.plotly_chart(fig_comp, use_container_width=True)
+        st.markdown("---")
+        st.markdown("#### 📍 Abrangência do serviço")
+        abr = dc.groupby("ABRANGENCIA", dropna=False)["MASSA_ROTA"].sum().reset_index()
+        st.dataframe(abr.style.format({"MASSA_ROTA": "{:,.0f}"}),
+                     use_container_width=True)
 
-# =========================================================
-# RODAPÉ - METODOLOGIA E FONTES
-# =========================================================
+        st.markdown("---")
+        st.markdown("#### 🏆 Top 15 municípios por massa coletada")
+        top15 = dr.sort_values("MASSA_TOTAL", ascending=False).head(15)[
+            ["MUNICIPIO", "UF", "POP_TOTAL", "MASSA_TOTAL", "MASSA_RECUPERADA"]
+        ].copy()
+        top15["PER_CAPITA"] = (top15["MASSA_TOTAL"] / top15["POP_TOTAL"] * 1000).round(0)
+        top15["% RECUP"] = (top15["MASSA_RECUPERADA"] / top15["MASSA_TOTAL"] * 100).round(2)
+        st.dataframe(
+            top15.style.format({
+                "POP_TOTAL": "{:,.0f}", "MASSA_TOTAL": "{:,.0f}",
+                "MASSA_RECUPERADA": "{:,.0f}", "PER_CAPITA": "{:,.0f}",
+                "% RECUP": "{:.2f}%",
+            }),
+            use_container_width=True,
+        )
+
+# ---------------------------------------------------------
+# TAB 4 — DESTINAÇÃO FINAL
+# ---------------------------------------------------------
+with tab4:
+    st.subheader("🏭 Destinação Final — Conformidade com a PNRS")
+
+    if dc.empty:
+        st.info("Sem dados de destinação para o filtro.")
+    else:
+        dest = dc.groupby("UNIDADE_DEST", dropna=False).agg(
+            MASSA=("MASSA_ROTA", "sum"),
+            ROTAS=("COD_ROTA", "nunique"),
+            MUNICIPIOS=("COD_IBGE", "nunique"),
+        ).reset_index()
+        dest["CATEGORIA"] = dest["UNIDADE_DEST"].apply(classificar_destino)
+        dest = dest.sort_values("MASSA", ascending=False)
+        dest["%"] = (dest["MASSA"] / dest["MASSA"].sum() * 100).round(2)
+
+        # Cards por categoria
+        cat = dest.groupby("CATEGORIA")["MASSA"].sum().reset_index()
+        cat["%"] = (cat["MASSA"] / cat["MASSA"].sum() * 100).round(2)
+        adeq = cat[cat["CATEGORIA"] == "Adequado"]["%"].sum()
+        inad = cat[cat["CATEGORIA"] == "Inadequado"]["%"].sum()
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("✅ Destinação adequada", f"{fmt_br(adeq, 1)}%")
+        c2.metric("🚨 Destinação inadequada", f"{fmt_br(inad, 1)}%")
+        c3.metric("📦 Transbordo (etapa intermediária)",
+                  f"{fmt_br(cat[cat['CATEGORIA']=='Transbordo']['%'].sum(), 1)}%")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            fig = px.pie(dest, names="UNIDADE_DEST", values="MASSA",
+                         title="Distribuição da massa por unidade de destino",
+                         hole=0.45)
+            fig.update_traces(textposition="inside", textinfo="percent+label")
+            fig.update_layout(height=500, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            fig = px.bar(
+                dest.sort_values("MASSA"),
+                x="MASSA", y="UNIDADE_DEST", orientation="h",
+                color="CATEGORIA",
+                color_discrete_map={
+                    "Adequado": "#27ae60",
+                    "Inadequado": "#e74c3c",
+                    "Transbordo": "#f39c12",
+                    "Outros": "#95a5a6",
+                    "Não informado": "#bdc3c7",
+                },
+                title="Massa por tipo de unidade (t/ano)",
+                labels={"MASSA": "t/ano", "UNIDADE_DEST": ""},
+            )
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.dataframe(
+            dest.style.format({"MASSA": "{:,.0f}", "ROTAS": "{:,.0f}",
+                               "MUNICIPIOS": "{:,.0f}", "%": "{:.2f}%"}),
+            use_container_width=True,
+        )
+
+        # Lixões ativos
+        st.markdown("---")
+        st.markdown("#### ⚠️ Municípios que ainda destinam para Lixão/Vazadouro")
+        lix = dc[dc["UNIDADE_DEST"].astype(str).str.contains("Lixão|Vazadouro", case=False, na=False)]
+        if lix.empty:
+            st.success("✅ Nenhum município do filtro destina para lixão/vazadouro.")
+        else:
+            resumo_lix = lix.groupby(["MUNICIPIO", "UF"], dropna=False).agg(
+                MASSA=("MASSA_ROTA", "sum"),
+                ROTAS=("COD_ROTA", "nunique"),
+            ).reset_index().sort_values("MASSA", ascending=False)
+            st.metric("Municípios com lixão ativo", resumo_lix.shape[0])
+            st.dataframe(resumo_lix.style.format({"MASSA": "{:,.0f}", "ROTAS": "{:,.0f}"}),
+                         use_container_width=True, height=350)
+
+        # Fluxo intermunicipal
+        st.markdown("---")
+        st.markdown("#### 🔀 Fluxos intermunicipais (exportação de resíduos)")
+        if "ENVIADO_OUTRO" in dc.columns:
+            fluxo = dc.groupby("ENVIADO_OUTRO", dropna=False)["MASSA_ROTA"].sum().reset_index()
+            st.dataframe(fluxo.style.format({"MASSA_ROTA": "{:,.0f}"}), use_container_width=True)
+
+            # Sankey: UF origem → UF destino
+            if "MUN_DEST" in dc.columns:
+                sub = dc[dc["ENVIADO_OUTRO"].astype(str).str.strip().str.lower() == "sim"].copy()
+                if not sub.empty:
+                    sub["UF_DEST"] = sub["MUN_DEST"].astype(str).str.extract(r"/([A-Z]{2})$")[0].fillna("?")
+                    sk = sub.groupby(["UF", "UF_DEST"], dropna=False)["MASSA_ROTA"].sum().reset_index()
+                    sk = sk[sk["MASSA_ROTA"] > 0].sort_values("MASSA_ROTA", ascending=False).head(60)
+                    if not sk.empty:
+                        labels = list(pd.unique(sk[["UF","UF_DEST"]].values.ravel()))
+                        idx = {l: i for i, l in enumerate(labels)}
+                        fig = go.Figure(go.Sankey(
+                            node=dict(label=labels, pad=12, thickness=16),
+                            link=dict(
+                                source=[idx[u] for u in sk["UF"]],
+                                target=[idx[v] for v in sk["UF_DEST"]],
+                                value=sk["MASSA_ROTA"].tolist(),
+                            ),
+                        ))
+                        fig.update_layout(title="Fluxo de massa entre UFs (t/ano)", height=520)
+                        st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------
+# TAB 5 — RECUPERAÇÃO DE MATERIAIS
+# ---------------------------------------------------------
+with tab5:
+    st.subheader("♻️ Recuperação de Materiais e Coleta Seletiva")
+
+    if dc.empty or dr.empty:
+        st.info("Sem dados para o filtro.")
+    else:
+        # Material reciclável recuperado por tipo
+        materiais = ["PAPEL_RECUP", "PLASTICO_RECUP", "METAL_RECUP", "VIDRO_RECUP", "OUTROS_RECUP"]
+        existentes = [c for c in materiais if c in dc.columns]
+        if existentes:
+            total_mat = dc[existentes].sum().reset_index()
+            total_mat.columns = ["Material", "Massa (t)"]
+            mapa = {"PAPEL_RECUP": "Papel/Papelão", "PLASTICO_RECUP": "Plástico",
+                    "METAL_RECUP": "Metal", "VIDRO_RECUP": "Vidro", "OUTROS_RECUP": "Outros"}
+            total_mat["Material"] = total_mat["Material"].map(mapa)
+            total_mat["%"] = (total_mat["Massa (t)"] / total_mat["Massa (t)"].sum() * 100).round(2)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                fig = px.pie(total_mat, names="Material", values="Massa (t)",
+                             title="Composição dos recicláveis recuperados", hole=0.45)
+                fig.update_traces(textposition="inside", textinfo="percent+label")
+                fig.update_layout(height=420, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            with c2:
+                st.dataframe(total_mat.style.format({"Massa (t)": "{:,.0f}", "%": "{:.2f}%"}),
+                             use_container_width=True)
+
+        # Taxa de recuperação — Top e Bottom
+        st.markdown("---")
+        st.markdown("#### 🏆 Taxa de recuperação por município (top 15 e bottom 15)")
+        tmp = dr[(dr["MASSA_TOTAL"] > 0) & (dr["POP_TOTAL"] > 0)].copy()
+        tmp["TAXA_RECUP"] = (tmp["MASSA_RECUPERADA"] / tmp["MASSA_TOTAL"] * 100).round(2)
+        top15 = tmp.nlargest(15, "TAXA_RECUP")[["MUNICIPIO","UF","MASSA_TOTAL","MASSA_RECUPERADA","TAXA_RECUP"]]
+        bot15 = tmp.nsmallest(15, "TAXA_RECUP")[["MUNICIPIO","UF","MASSA_TOTAL","MASSA_RECUPERADA","TAXA_RECUP"]]
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**🟢 Top 15 — melhores taxas**")
+            st.dataframe(top15.style.format({"MASSA_TOTAL":"{:,.0f}","MASSA_RECUPERADA":"{:,.0f}","TAXA_RECUP":"{:.2f}%"}),
+                         use_container_width=True, hide_index=True)
+        with c2:
+            st.markdown("**🔴 Bottom 15 — piores taxas**")
+            st.dataframe(bot15.style.format({"MASSA_TOTAL":"{:,.0f}","MASSA_RECUPERADA":"{:,.0f}","TAXA_RECUP":"{:.2f}%"}),
+                         use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# TAB 6 — INCLUSÃO SOCIOPRODUTIVA
+# ---------------------------------------------------------
+with tab6:
+    st.subheader("👥 Inclusão Socioprodutiva de Catadores e Frota")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🏭 Cooperativas/associações", f"{fmt_br(dr['N_COOP'].sum())}")
+    c2.metric("👷 Catadores organizados", f"{fmt_br(dr['CATADORES_ORG'].sum())}")
+    c3.metric("🚶 Catadores informais", f"{fmt_br(dr['CATADORES_INFO'].sum())}")
+    c4.metric("🚛 Veículos na frota", f"{fmt_br(dr['N_VEICULOS'].sum())}")
+
+    st.markdown("---")
+    st.markdown("#### 🏆 Top 15 municípios por catadores organizados")
+    top_cat = dr.nlargest(15, "CATADORES_ORG")[
+        ["MUNICIPIO","UF","N_COOP","CATADORES_ORG","CATADORES_INFO"]
+    ]
+    st.dataframe(top_cat.style.format({
+        "N_COOP":"{:,.0f}","CATADORES_ORG":"{:,.0f}","CATADORES_INFO":"{:,.0f}"
+    }), use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.markdown("#### 🚛 Frota de veículos — distribuição por tipo e idade")
+    dv = dados[ano_sel]["veiculos"]
+    if not dv.empty and "TIPO_VEICULO" in dv.columns:
+        dv_f = filtrar(dv, ano_sel)
+        c1, c2 = st.columns(2)
+        with c1:
+            t = dv_f.groupby("TIPO_VEICULO", dropna=False)["QTD"].sum().reset_index().sort_values("QTD", ascending=False)
+            fig = px.bar(t, x="QTD", y="TIPO_VEICULO", orientation="h",
+                         title="Veículos por tipo", labels={"QTD":"unidades","TIPO_VEICULO":""})
+            fig.update_layout(height=380, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            f = dv_f.groupby("FAIXA_IDADE", dropna=False)["QTD"].sum().reset_index().sort_values("QTD", ascending=False)
+            fig = px.bar(f, x="FAIXA_IDADE", y="QTD",
+                         title="Veículos por faixa de idade", labels={"QTD":"unidades","FAIXA_IDADE":""})
+            fig.update_layout(height=380, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("#### 🏭 Cooperativas — serviços prestados")
+    dk = dados[ano_sel]["cooperativas"]
+    if not dk.empty and "SERVICOS" in dk.columns:
+        dk_f = filtrar(dk, ano_sel)
+        # Contar por serviço (serviços estão em uma célula multi-linha "1-Triagem\n2-Coleta\n...")
+        servicos_contados = {"Triagem": 0, "Coleta": 0, "Educação ambiental": 0,
+                             "Compostagem": 0, "Recebimento de óleo de cozinha": 0}
+        for s in dk_f["SERVICOS"].dropna():
+            for k in servicos_contados:
+                if k.lower() in str(s).lower():
+                    servicos_contados[k] += 1
+        df_serv = pd.DataFrame(list(servicos_contados.items()), columns=["Serviço","Nº de cooperativas"])
+        df_serv = df_serv.sort_values("Nº de cooperativas", ascending=False)
+        fig = px.bar(df_serv, x="Nº de cooperativas", y="Serviço", orientation="h",
+                     title="Serviços prestados pelas cooperativas/associações")
+        fig.update_layout(height=350, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------
+# TAB 7 — DADOS E EXPORTAÇÃO
+# ---------------------------------------------------------
+with tab7:
+    st.subheader("📥 Dados Consolidados e Exportação")
+
+    st.markdown("#### Painel municipal consolidado")
+    base = dr[[c for c in ["COD_IBGE","MUNICIPIO","UF","REGIAO","POP_TOTAL",
+                            "MASSA_TOTAL","MASSA_RECUPERADA","N_VEICULOS",
+                            "N_COOP","CATADORES_ORG","CATADORES_INFO","ESTUDO_CARACT"] if c in dr.columns]].copy()
+    if "MASSA_TOTAL" in base.columns and "POP_TOTAL" in base.columns:
+        base["PER_CAPITA_KG"] = (base["MASSA_TOTAL"] / base["POP_TOTAL"] * 1000).round(1)
+    if "MASSA_TOTAL" in base.columns and "MASSA_RECUPERADA" in base.columns:
+        base["TAXA_RECUP_%"] = (base["MASSA_RECUPERADA"] / base["MASSA_TOTAL"] * 100).round(2)
+    base = base.sort_values("MASSA_TOTAL", ascending=False)
+
+    st.dataframe(
+        base.style.format({
+            "POP_TOTAL":"{:,.0f}","MASSA_TOTAL":"{:,.0f}",
+            "MASSA_RECUPERADA":"{:,.0f}","PER_CAPITA_KG":"{:,.1f}",
+            "TAXA_RECUP_%":"{:.2f}","N_VEICULOS":"{:,.0f}",
+            "N_COOP":"{:,.0f}","CATADORES_ORG":"{:,.0f}","CATADORES_INFO":"{:,.0f}",
+        }),
+        use_container_width=True, height=500,
+    )
+
+    st.markdown("---")
+    st.markdown("#### 📤 Baixar dados")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        csv_mun = base.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Painel municipal (CSV)",
+            data=csv_mun,
+            file_name=f"rsu_municipal_{ano_sel}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with c2:
+        if not dc.empty:
+            csv_dest = dc.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Rotas e destinos (CSV)",
+                data=csv_dest,
+                file_name=f"rsu_rotas_{ano_sel}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+    with c3:
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as w:
+            base.to_excel(w, sheet_name="Municipal", index=False)
+            if not dc.empty:
+                dc.head(5000).to_excel(w, sheet_name="Rotas", index=False)
+            reg.to_excel(w, sheet_name="Regiao", index=False)
+            uf.to_excel(w, sheet_name="UF", index=False)
+        st.download_button(
+            "⬇️ Pacote completo (XLSX)",
+            data=buf.getvalue(),
+            file_name=f"rsu_brasil_{ano_sel}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+# ---------------------------------------------------------
+# RODAPÉ
+# ---------------------------------------------------------
 st.markdown("---")
-st.subheader("📌 Metodologia e Fontes para Auditoria")
-st.markdown("""
-- **Fonte dos dados:** SNIS (Sistema Nacional de Informações sobre Saneamento) – Módulo Manejo de Resíduos Sólidos, anos 2023 e 2024.  
-- **Período de referência:** Dados anuais declarados pelos municípios.  
-- **Indicadores calculados:**  
-  - **Geração per capita (kg/hab/ano):** Massa total de RSU (convertida para kg) ÷ População total.  
-  - **Geração per capita (kg/hab/dia):** Geração per capita anual ÷ 365 dias.  
-  - **Taxa de coleta seletiva (%):** (Massa de resíduos coletada seletivamente ÷ Massa total de RSU) × 100.  
-  - **Variação da massa total:** ((Massa 2024 - Massa 2023) ÷ Massa 2023) × 100.  
-- **Transbordos:** Por padrão, rotas com destino "Transbordo" são excluídas para evitar dupla contagem. O usuário pode optar por incluí-las via checkbox.  
-- **Conversões:** Massas em toneladas são convertidas para kg para o cálculo per capita (1 t = 1000 kg).  
-- **Arredondamentos:** Valores exibidos com duas casas decimais, exceto per capita diária (três casas) para melhor precisão.
+st.caption("""
+**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.0
+Fonte: **SINISA** (Sistema Nacional de Informações sobre Saneamento) · Metodologia alinhada à
+**PNRS (Lei 12.305/2010)**, **Decreto 10.936/2022** e **PLANARES (Decreto 11.043/2022)**.
+Ferramenta de apoio ao **Ministério do Meio Ambiente (MMA)** e órgãos de controle.
 """)
-st.caption(f"📅 Dados do SNIS - {ano_base} | Desenvolvido com Streamlit e Plotly | Arquivos locais.")
