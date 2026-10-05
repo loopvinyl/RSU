@@ -1,7 +1,7 @@
 # =========================================================
 # RSU BRASIL — MONITORAMENTO DA GESTÃO DE RESÍDUOS SÓLIDOS URBANOS
 # Subsídio ao Ministério do Meio Ambiente (MMA) — PNRS / PLANARES / SINISA
-# v2.5.1 — indentação corrigida + f-string substituída por concatenação
+# v2.6 — filtro de município com cascata Região → UF → Município
 # =========================================================
 from pathlib import Path
 import numpy as np
@@ -46,6 +46,7 @@ CORES_REGIAO = {
     "Norte": "#1f9e89", "Nordeste": "#f39c12",
     "Centro-Oeste": "#8e44ad", "Sudeste": "#2980b9", "Sul": "#27ae60",
 }
+MUN_TODOS = "📌 Todos os municípios"
 
 # ---------------------------------------------------------
 # HELPERS
@@ -257,29 +258,87 @@ e das metas de universalização e recuperação.
 """)
 
 # ---------------------------------------------------------
-# FILTROS DA SIDEBAR
+# FILTROS DA SIDEBAR (com cascata Região → UF → Município)
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Filtros globais")
-ano_sel = st.sidebar.selectbox("Ano de referência:", ANOS_DISP, index=len(ANOS_DISP) - 1)
-ano_comp = st.sidebar.selectbox("Comparar com:",
-    ["—"] + [a for a in ANOS_DISP if a != ano_sel])
-uf_sel = st.sidebar.selectbox(
-    "Estado (UF):",
-    ["BRASIL – Todos"] + sorted(dados[ano_sel]["residuos"]["UF"].dropna().unique().tolist())
+ano_sel = st.sidebar.selectbox(
+    "Ano de referência:", ANOS_DISP, index=len(ANOS_DISP) - 1
 )
-reg_sel = st.sidebar.selectbox(
-    "Região:",
-    ["Todas"] + sorted(dados[ano_sel]["residuos"]["REGIAO"].dropna().unique().tolist())
+ano_comp = st.sidebar.selectbox(
+    "Comparar com:", ["—"] + [a for a in ANOS_DISP if a != ano_sel]
 )
 
-def filtrar(df, col_uf="UF", col_reg="REGIAO"):
+st.sidebar.markdown("---")
+
+# 1) Região
+reg_sel = st.sidebar.selectbox(
+    "🌎 Região:",
+    ["Todas"] + sorted(
+        dados[ano_sel]["residuos"]["REGIAO"].dropna().unique().tolist()
+    ),
+    help="Filtra as UFs disponíveis abaixo.",
+)
+
+# 2) UF (cascata da região)
+_dr_base = dados[ano_sel]["residuos"].copy()
+if reg_sel != "Todas":
+    _dr_base = _dr_base[_dr_base["REGIAO"] == reg_sel]
+uf_opts = sorted(_dr_base["UF"].dropna().unique().tolist())
+
+uf_sel = st.sidebar.selectbox(
+    "🗺️ Estado (UF):",
+    ["BRASIL – Todos"] + uf_opts,
+    help="Filtra os municípios disponíveis abaixo.",
+)
+
+# 3) Município (cascata da região + UF)
+_dr_mun_base = _dr_base.copy()
+if uf_sel != "BRASIL – Todos":
+    _dr_mun_base = _dr_mun_base[_dr_mun_base["UF"] == uf_sel]
+mun_opts = sorted(_dr_mun_base["MUNICIPIO"].dropna().unique().tolist())
+
+mun_sel = st.sidebar.selectbox(
+    f"🏙️ Município ({len(mun_opts)} disponíveis):",
+    [MUN_TODOS] + mun_opts,
+    help="Foque o monitoramento em uma cidade específica. "
+         "Todas as abas passam a mostrar apenas os dados dela.",
+)
+
+# Badge de foco
+if mun_sel != MUN_TODOS:
+    _row = _dr_mun_base[_dr_mun_base["MUNICIPIO"] == mun_sel]
+    if not _row.empty:
+        uf_real = _row.iloc[0].get("UF", "")
+        reg_real = _row.iloc[0].get("REGIAO", "")
+        st.sidebar.success(f"🎯 **Foco:** {mun_sel} / {uf_real}  \n🌎 {reg_real}")
+elif uf_sel != "BRASIL – Todos":
+    st.sidebar.info(f"🗺️ Escopo: **{uf_sel}** ({len(mun_opts)} municípios)")
+elif reg_sel != "Todas":
+    st.sidebar.info(f"🌎 Escopo: **{reg_sel}** ({len(mun_opts)} municípios)")
+
+# ---------------------------------------------------------
+# FUNÇÃO DE FILTRO (agora com município)
+# ---------------------------------------------------------
+def filtrar(df, col_uf="UF", col_reg="REGIAO", col_mun="MUNICIPIO"):
     if df.empty:
         return df
-    if uf_sel != "BRASIL – Todos" and col_uf in df.columns:
-        df = df[df[col_uf] == uf_sel]
     if reg_sel != "Todas" and col_reg in df.columns:
         df = df[df[col_reg] == reg_sel]
+    if uf_sel != "BRASIL – Todos" and col_uf in df.columns:
+        df = df[df[col_uf] == uf_sel]
+    if mun_sel != MUN_TODOS and col_mun in df.columns:
+        df = df[df[col_mun] == mun_sel]
     return df
+
+# Rótulo dinâmico do escopo (usado nos subtítulos das abas)
+def rotulo_escopo():
+    if mun_sel != MUN_TODOS:
+        return f"📍 {mun_sel}"
+    if uf_sel != "BRASIL – Todos":
+        return f"🗺️ {uf_sel}"
+    if reg_sel != "Todas":
+        return f"🌎 {reg_sel}"
+    return "🇧🇷 Brasil"
 
 dr = filtrar(dados[ano_sel]["residuos"])
 dc = filtrar(dados[ano_sel]["coleta"])
@@ -332,7 +391,7 @@ st.caption(
 # TAB 1 — PAINEL NACIONAL
 # ---------------------------------------------------------
 with tab1:
-    st.subheader(f"Painel Nacional — SINISA {ano_sel}")
+    st.subheader(f"{rotulo_escopo()} — SINISA {ano_sel}")
     aviso_filtro_transbordo(afetada=True)
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
@@ -457,7 +516,7 @@ with tab1:
         st.markdown(texto_interpretacao)
 
     # ---------- Top 15 municípios com maior gap ----------
-    if not dc.empty and not dr.empty:
+    if not dc.empty and not dr.empty and mun_sel == MUN_TODOS:
         with st.expander("🏴 Top 15 municípios com maior gap de rastreabilidade (massa coletada − massa roteada)"):
             dr_gap = dr[["COD_IBGE", "MUNICIPIO", "UF", "MASSA_TOTAL"]].copy()
             dc_gap = dc.groupby("COD_IBGE", dropna=False)["MASSA_ROTA"].sum().reset_index()
@@ -544,7 +603,7 @@ with tab1:
 # TAB 2 — COLETA E COBERTURA
 # ---------------------------------------------------------
 with tab2:
-    st.subheader("🚛 Coleta e Cobertura")
+    st.subheader(f"🚛 Coleta e Cobertura — {rotulo_escopo()}")
     aviso_filtro_transbordo(afetada=True)
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
@@ -593,23 +652,24 @@ with tab2:
         st.dataframe(abr.style.format({"MASSA_ROTA": "{:,.0f}"}),
                      use_container_width=True)
 
-        st.markdown("---")
-        st.markdown("#### 🏆 Top 15 municípios por massa coletada")
-        top15 = dr.sort_values("MASSA_TOTAL", ascending=False).head(15)[
-            ["MUNICIPIO", "UF", "POP_TOTAL", "MASSA_TOTAL", "MASSA_RECUPERADA"]].copy()
-        top15["PER_CAPITA"] = (top15["MASSA_TOTAL"] / top15["POP_TOTAL"] * 1000).round(0)
-        top15["% RECUP"] = (top15["MASSA_RECUPERADA"] / top15["MASSA_TOTAL"] * 100).round(2)
-        st.dataframe(top15.style.format({
-            "POP_TOTAL": "{:,.0f}", "MASSA_TOTAL": "{:,.0f}",
-            "MASSA_RECUPERADA": "{:,.0f}", "PER_CAPITA": "{:,.0f}",
-            "% RECUP": "{:.2f}%",
-        }), use_container_width=True)
+        if mun_sel == MUN_TODOS:
+            st.markdown("---")
+            st.markdown("#### 🏆 Top 15 municípios por massa coletada")
+            top15 = dr.sort_values("MASSA_TOTAL", ascending=False).head(15)[
+                ["MUNICIPIO", "UF", "POP_TOTAL", "MASSA_TOTAL", "MASSA_RECUPERADA"]].copy()
+            top15["PER_CAPITA"] = (top15["MASSA_TOTAL"] / top15["POP_TOTAL"] * 1000).round(0)
+            top15["% RECUP"] = (top15["MASSA_RECUPERADA"] / top15["MASSA_TOTAL"] * 100).round(2)
+            st.dataframe(top15.style.format({
+                "POP_TOTAL": "{:,.0f}", "MASSA_TOTAL": "{:,.0f}",
+                "MASSA_RECUPERADA": "{:,.0f}", "PER_CAPITA": "{:,.0f}",
+                "% RECUP": "{:.2f}%",
+            }), use_container_width=True)
 
 # ---------------------------------------------------------
 # TAB 3 — DESTINAÇÃO FINAL
 # ---------------------------------------------------------
 with tab3:
-    st.subheader("🏭 Destinação Final — Conformidade com a PNRS")
+    st.subheader(f"🏭 Destinação Final — {rotulo_escopo()}")
     aviso_filtro_transbordo(afetada=True)
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
@@ -730,7 +790,7 @@ with tab3:
 # TAB 4 — RECUPERAÇÃO DE MATERIAIS
 # ---------------------------------------------------------
 with tab4:
-    st.subheader("♻️ Recuperação de Materiais e Coleta Seletiva")
+    st.subheader(f"♻️ Recuperação de Materiais — {rotulo_escopo()}")
     aviso_filtro_transbordo(afetada=True)
 
     dc_tab = filtrar_transbordo(dc, excluir_transbordo)
@@ -785,7 +845,7 @@ with tab4:
 # TAB 5 — ANÁLISE TERRITORIAL (não afetada pelo filtro)
 # ---------------------------------------------------------
 with tab5:
-    st.subheader("🗺️ Análise Territorial — Região e Estado")
+    st.subheader(f"🗺️ Análise Territorial — {rotulo_escopo()}")
     aviso_filtro_transbordo(
         afetada=False,
         motivo_nao_afeta="Esta aba usa dados agregados por município "
@@ -854,7 +914,7 @@ with tab5:
 # TAB 6 — INCLUSÃO SOCIOPRODUTIVA (não afetada pelo filtro)
 # ---------------------------------------------------------
 with tab6:
-    st.subheader("👥 Inclusão Socioprodutiva de Catadores e Frota")
+    st.subheader(f"👥 Inclusão Socioprodutiva — {rotulo_escopo()}")
     aviso_filtro_transbordo(
         afetada=False,
         motivo_nao_afeta="Esta aba usa o cadastro de cooperativas e a frota de "
@@ -869,7 +929,7 @@ with tab6:
 
     st.markdown("---")
     st.markdown("#### 🏆 Top 15 municípios por catadores organizados")
-    top_cat = dr.nlargest(15, "CATADORES_ORG")[
+    top_cat = dr.nlargest(min(15, len(dr)), "CATADORES_ORG")[
         ["MUNICIPIO", "UF", "N_COOP", "CATADORES_ORG", "CATADORES_INFO"]]
     st.dataframe(top_cat.style.format({
         "N_COOP": "{:,.0f}", "CATADORES_ORG": "{:,.0f}", "CATADORES_INFO": "{:,.0f}"
@@ -880,49 +940,55 @@ with tab6:
     dv = dados[ano_sel]["veiculos"]
     if not dv.empty and "TIPO_VEICULO" in dv.columns:
         dv_f = filtrar(dv)
-        c1, c2 = st.columns(2)
-        with c1:
-            t = (dv_f.groupby("TIPO_VEICULO", dropna=False)["QTD"].sum()
-                 .reset_index().sort_values("QTD", ascending=False))
-            fig = px.bar(t, x="QTD", y="TIPO_VEICULO", orientation="h",
-                         title="Veículos por tipo",
-                         labels={"QTD": "unidades", "TIPO_VEICULO": ""})
-            fig.update_layout(height=380, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            f = (dv_f.groupby("FAIXA_IDADE", dropna=False)["QTD"].sum()
-                 .reset_index().sort_values("QTD", ascending=False))
-            fig = px.bar(f, x="FAIXA_IDADE", y="QTD",
-                         title="Veículos por faixa de idade",
-                         labels={"QTD": "unidades", "FAIXA_IDADE": ""})
-            fig.update_layout(height=380, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+        if dv_f.empty:
+            st.info("Sem dados de frota para o filtro selecionado.")
+        else:
+            c1, c2 = st.columns(2)
+            with c1:
+                t = (dv_f.groupby("TIPO_VEICULO", dropna=False)["QTD"].sum()
+                     .reset_index().sort_values("QTD", ascending=False))
+                fig = px.bar(t, x="QTD", y="TIPO_VEICULO", orientation="h",
+                             title="Veículos por tipo",
+                             labels={"QTD": "unidades", "TIPO_VEICULO": ""})
+                fig.update_layout(height=380, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            with c2:
+                f = (dv_f.groupby("FAIXA_IDADE", dropna=False)["QTD"].sum()
+                     .reset_index().sort_values("QTD", ascending=False))
+                fig = px.bar(f, x="FAIXA_IDADE", y="QTD",
+                             title="Veículos por faixa de idade",
+                             labels={"QTD": "unidades", "FAIXA_IDADE": ""})
+                fig.update_layout(height=380, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### 🏭 Cooperativas — serviços prestados")
     dk = dados[ano_sel]["cooperativas"]
     if not dk.empty and "SERVICOS" in dk.columns:
         dk_f = filtrar(dk)
-        servicos_contados = {"Triagem": 0, "Coleta": 0, "Educação ambiental": 0,
-                             "Compostagem": 0, "Recebimento de óleo de cozinha": 0}
-        for s in dk_f["SERVICOS"].dropna():
-            for k in servicos_contados:
-                if k.lower() in str(s).lower():
-                    servicos_contados[k] += 1
-        df_serv = (pd.DataFrame(list(servicos_contados.items()),
-                                columns=["Serviço", "Nº de cooperativas"])
-                   .sort_values("Nº de cooperativas", ascending=False))
-        fig = px.bar(df_serv, x="Nº de cooperativas", y="Serviço", orientation="h",
-                     title="Serviços prestados pelas cooperativas/associações")
-        fig.update_layout(height=350, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        if dk_f.empty:
+            st.info("Sem dados de cooperativas para o filtro selecionado.")
+        else:
+            servicos_contados = {"Triagem": 0, "Coleta": 0, "Educação ambiental": 0,
+                                 "Compostagem": 0, "Recebimento de óleo de cozinha": 0}
+            for s in dk_f["SERVICOS"].dropna():
+                for k in servicos_contados:
+                    if k.lower() in str(s).lower():
+                        servicos_contados[k] += 1
+            df_serv = (pd.DataFrame(list(servicos_contados.items()),
+                                    columns=["Serviço", "Nº de cooperativas"])
+                       .sort_values("Nº de cooperativas", ascending=False))
+            fig = px.bar(df_serv, x="Nº de cooperativas", y="Serviço", orientation="h",
+                         title="Serviços prestados pelas cooperativas/associações")
+            fig.update_layout(height=350, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------------------------------------
 # RODAPÉ
 # ---------------------------------------------------------
 st.markdown("---")
 st.caption("""
-**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.5.1
+**RSU Brasil — Monitoramento da Gestão de Resíduos Sólidos Urbanos** · v2.6
 Fonte: **SINISA** · Metodologia alinhada à **PNRS (Lei 12.305/2010)**, **Decreto 10.936/2022**
 e **PLANARES (Decreto 11.043/2022)**. Ferramenta de apoio ao **Ministério do Meio Ambiente (MMA)**.
 """)
